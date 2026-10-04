@@ -35,12 +35,12 @@ LANGUAGE sql STABLE AS $f$
               JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum) AS cols,
            (SELECT bool_and(a.attnotnull)
               FROM unnest(i.indkey::int2[]) AS k(attnum)
-              JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum) AS notnull,
+              JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum) AS all_notnull,
            i.indexprs IS NULL AND i.indpred IS NULL AND NOT (0 = ANY (i.indkey::int2[])) AS plain
       FROM pg_index i
      WHERE i.indrelid = r AND (i.indisprimary OR i.indisunique) AND i.indisvalid
   ) x
-  WHERE plain AND (indisprimary OR notnull)
+  WHERE plain AND (indisprimary OR all_notnull)
   ORDER BY indisprimary DESC, array_length(cols, 1)
   LIMIT 1
 $f$;
@@ -82,7 +82,59 @@ BEGIN
   END IF;
   INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, snap, key_cols, row_count, statement)
   VALUES (p_grp, p_kind, ns, nm, p_snap, k, n, p_stmt);
+  IF p_kind = 'delete' THEN
+    n := n + oops._snap_fk_children(r, p_snap, p_grp, p_stmt, 0);
+  END IF;
   RETURN n;
+END
+$f$;
+
+-- Rows in other tables that a DELETE will remove or change through
+-- ON DELETE CASCADE, SET NULL or SET DEFAULT foreign keys.
+CREATE OR REPLACE FUNCTION oops._snap_fk_children(r regclass, p_snap text, p_grp text, p_stmt text, depth int)
+RETURNS bigint LANGUAGE plpgsql AS $f$
+DECLARE
+  c record;
+  cond text;
+  child_snap text;
+  n bigint;
+  total bigint := 0;
+  kind text;
+  k text[];
+  ns text; nm text;
+BEGIN
+  IF depth > 10 THEN RETURN 0; END IF;
+  FOR c IN SELECT oid, conrelid::regclass AS child, conkey, confkey, confdeltype FROM pg_constraint
+            WHERE contype = 'f' AND confrelid = r AND confdeltype IN ('c', 'n', 'd') LOOP
+    SELECT string_agg(format('ch.%I = p.%I', ca.attname, pa.attname), ' AND ')
+      INTO cond
+      FROM unnest(c.conkey, c.confkey) AS m(ck, pk)
+      JOIN pg_attribute ca ON ca.attrelid = c.child AND ca.attnum = m.ck
+      JOIN pg_attribute pa ON pa.attrelid = r AND pa.attnum = m.pk;
+    child_snap := left(p_grp || '_fk' || c.oid || '_' || depth, 63);
+    IF to_regclass(format('oops.%I', child_snap)) IS NOT NULL THEN CONTINUE; END IF;
+    k := oops.key_cols(c.child);
+    kind := CASE WHEN c.confdeltype = 'c' THEN 'delete' ELSE 'update' END;
+    IF kind = 'update' AND k IS NULL THEN
+      kind := 'update_full';
+      EXECUTE format('CREATE TABLE oops.%I AS TABLE %s', child_snap, c.child);
+    ELSE
+      EXECUTE format('CREATE TABLE oops.%I AS SELECT ch.* FROM %s ch WHERE EXISTS (SELECT 1 FROM oops.%I p WHERE %s)', child_snap, c.child, p_snap, cond);
+    END IF;
+    EXECUTE format('SELECT count(*) FROM oops.%I', child_snap) INTO n;
+    IF n = 0 THEN
+      EXECUTE format('DROP TABLE oops.%I', child_snap);
+      CONTINUE;
+    END IF;
+    SELECT nspname, relname INTO ns, nm FROM pg_class cl JOIN pg_namespace s ON s.oid = cl.relnamespace WHERE cl.oid = c.child;
+    INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, snap, key_cols, row_count, statement)
+    VALUES (p_grp, kind, ns, nm, child_snap, k, n, p_stmt);
+    total := total + n;
+    IF c.confdeltype = 'c' THEN
+      total := total + oops._snap_fk_children(c.child, child_snap, p_grp, p_stmt, depth + 1);
+    END IF;
+  END LOOP;
+  RETURN total;
 END
 $f$;
 
@@ -267,9 +319,11 @@ DECLARE
   def text;
   ns text; nm text;
   keylist text;
+  post text[];
+  dep record;
 BEGIN
   IF r IS NULL THEN RETURN 0; END IF;
-  SELECT at.attname, format_type(at.atttypid, at.atttypmod) AS typ, at.attnotnull, at.attgenerated, pg_get_expr(d.adbin, d.adrelid) AS dflt
+  SELECT at.attnum, at.attname, format_type(at.atttypid, at.atttypmod) AS typ, at.attnotnull, at.attgenerated, pg_get_expr(d.adbin, d.adrelid) AS dflt
     INTO a
     FROM pg_attribute at LEFT JOIN pg_attrdef d ON d.adrelid = at.attrelid AND d.adnum = at.attnum
    WHERE at.attrelid = r AND at.attname = p_col AND at.attnum > 0 AND NOT at.attisdropped;
@@ -290,8 +344,26 @@ BEGIN
   END IF;
   EXECUTE format('CREATE TABLE oops.%I AS SELECT %s, %I FROM %s', snap, keylist, p_col, r);
   EXECUTE format('SELECT count(*) FROM oops.%I', snap) INTO n;
-  INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, col_name, snap, key_cols, col_def, meta, row_count, statement)
-  VALUES (p_grp, 'drop_column', ns, nm, p_col, snap, k, def, jsonb_build_object('not_null', a.attnotnull, 'generated', a.attgenerated = 's'), n, p_stmt);
+  -- Constraints, indexes and views that go away with the column.
+  post := '{}';
+  FOR dep IN SELECT conname, pg_get_constraintdef(oid) AS cdef FROM pg_constraint
+              WHERE conrelid = r AND a.attnum = ANY (conkey) AND contype IN ('p', 'u', 'c', 'f', 'x') LOOP
+    post := post || format('ALTER TABLE %s ADD CONSTRAINT %I %s', oops.qualified(r), dep.conname, dep.cdef);
+  END LOOP;
+  FOR dep IN SELECT DISTINCT pg_get_indexdef(d.objid) AS idef FROM pg_depend d JOIN pg_index i ON i.indexrelid = d.objid
+              WHERE d.classid = 'pg_class'::regclass AND d.refobjid = r AND d.refobjsubid = a.attnum
+                AND NOT EXISTS (SELECT 1 FROM pg_constraint co WHERE co.conindid = i.indexrelid) LOOP
+    post := post || dep.idef;
+  END LOOP;
+  FOR dep IN SELECT DISTINCT v.oid, v.relkind, format('%I.%I', vn.nspname, v.relname) AS vname
+               FROM pg_depend d JOIN pg_rewrite rw ON rw.oid = d.objid JOIN pg_class v ON v.oid = rw.ev_class
+               JOIN pg_namespace vn ON vn.oid = v.relnamespace
+              WHERE d.classid = 'pg_rewrite'::regclass AND d.refobjid = r AND d.refobjsubid = a.attnum AND v.oid <> r LOOP
+    post := post || format(CASE WHEN dep.relkind = 'm' THEN 'CREATE MATERIALIZED VIEW %s AS %s' ELSE 'CREATE VIEW %s AS %s' END,
+                           dep.vname, rtrim(pg_get_viewdef(dep.oid), ';'));
+  END LOOP;
+  INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, col_name, snap, key_cols, col_def, ddl_post, meta, row_count, statement)
+  VALUES (p_grp, 'drop_column', ns, nm, p_col, snap, k, def, post, jsonb_build_object('not_null', a.attnotnull, 'generated', a.attgenerated = 's'), n, p_stmt);
   RETURN n;
 END
 $f$;

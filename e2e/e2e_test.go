@@ -33,6 +33,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	code := m.Run()
+	stopPG()
 	os.RemoveAll(dir)
 	os.Exit(code)
 }
