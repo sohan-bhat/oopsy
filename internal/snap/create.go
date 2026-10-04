@@ -36,6 +36,7 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 	}
 
 	var paths []string
+	gitOwned := map[string]string{}
 	seenProg := map[string]bool{}
 	for _, a := range actions {
 		if !seenProg[a.Program] {
@@ -53,6 +54,11 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 			recs, gp, note := gitPrepare(a.Git)
 			s.Git = append(s.Git, recs...)
 			paths = append(paths, gp...)
+			if a.Git.Kind == "reset-hard" || a.Git.Kind == "checkout-paths" {
+				for _, p := range gp {
+					gitOwned[filepath.Clean(p)] = a.Git.Repo
+				}
+			}
 			if note != "" {
 				s.Notes = append(s.Notes, note)
 			}
@@ -69,7 +75,7 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 			s.Skipped = append(s.Skipped, Skip{Path: p, Reason: reason})
 			continue
 		}
-		e := Entry{Orig: p, Store: filepath.Join("files", fmt.Sprint(i))}
+		e := Entry{Orig: p, Store: filepath.Join("files", fmt.Sprint(i)), GitRepo: gitOwned[p]}
 		switch {
 		case fi.Mode()&os.ModeSymlink != 0:
 			e.Type = "symlink"

@@ -569,6 +569,7 @@ func explainCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&cwd, "cwd", "", "directory the command would run in")
+	c.Flags().SetInterspersed(false)
 	return c
 }
 

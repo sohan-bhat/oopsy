@@ -84,6 +84,7 @@ type Entry struct {
 	Files       int    `json:"files"`
 	Method      string `json:"method"` // clone, reflink, copy
 	ParentMtime int64  `json:"parent_mtime,omitempty"`
+	GitRepo     string `json:"git_repo,omitempty"` // set when git would have overwritten a tracked file
 }
 
 // GitRecord is git state saved before a git command.

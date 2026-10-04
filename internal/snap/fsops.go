@@ -153,3 +153,26 @@ func ProbeClone(dir string) string {
 	}
 	return cloneMethod
 }
+
+// fixDirTimes copies directory timestamps from src to dst. Clones and
+// copies create directories fresh, which would otherwise stamp them "now".
+func fixDirTimes(src, dst string) {
+	_ = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		rel, _ := filepath.Rel(src, p)
+		target := filepath.Join(dst, rel)
+		atime := fi.ModTime()
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			atime = statAtime(st)
+		}
+		ts := []unix.Timespec{unix.NsecToTimespec(atime.UnixNano()), unix.NsecToTimespec(fi.ModTime().UnixNano())}
+		_ = unix.UtimesNanoAt(unix.AT_FDCWD, target, ts, unix.AT_SYMLINK_NOFOLLOW)
+		return nil
+	})
+}
