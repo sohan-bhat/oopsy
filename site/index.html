@@ -154,11 +154,12 @@
     <div class="pg__copy">
       <h2 id="pg-title" class="h2">Postgres, too.</h2>
       <p>Run <code>oops db proxy --upstream postgres://...</code> and point your app or agent at the proxy instead. Before any <code>DROP TABLE</code>, <code>TRUNCATE</code>, <code>DELETE</code> or <code>UPDATE</code> reaches the database, Oopsy saves the rows it is about to touch.</p>
+      <p>Or skip the setup: <code>oops db wrap -- npm run dev</code> runs your command with <code>DATABASE_URL</code> pointed at a temporary proxy.</p>
       <p>Forgot the <code>WHERE</code>? <code>oops db undo</code>.</p>
     </div>
     <div class="db" id="db" aria-label="Interactive database demo">
       <div class="db__bar">
-        <span class="term__title">acme on localhost via oopsy proxy</span>
+        <span class="term__title">psql to 127.0.0.1:6543, the oops db proxy</span>
         <button class="term__reset" id="db-reset" type="button">Reset</button>
       </div>
       <div class="db__table-wrap">
