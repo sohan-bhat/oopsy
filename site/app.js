@@ -590,8 +590,7 @@ export async function createInvoice(user, items) {
   });
 
   function intro() {
-    line(`<span class="d"># This is acme-app. src/api.ts has two hours of uncommitted work,</span>`);
-    line(`<span class="d"># and .env is not in git at all. Oopsy is on.</span>`);
+    line(`<span class="d"># api.ts has uncommitted work. .env is not in git.</span>`);
     line(`<span class="d"># Destroy something, then type</span> <span class="y">oops</span><span class="d">.</span>`);
     gap();
   }
