@@ -123,9 +123,10 @@ export async function createInvoice(user, items) {
 
   let nodes, order, snapshots, oopsyOn, history, histIdx, busy, startedAt, hexSeed;
 
+  // Real Oopsy numbers snapshots 1, 2, 3... Start a little way in, like a machine that has been using it.
   function newId() {
-    hexSeed = (hexSeed * 1103515245 + 12345) & 0x7fffffff;
-    return (hexSeed % 0xffff).toString(16).padStart(4, "0");
+    hexSeed += 1;
+    return String(hexSeed);
   }
 
   function initState() {
@@ -148,7 +149,7 @@ export async function createInvoice(user, items) {
     histIdx = 0;
     busy = false;
     startedAt = Date.now();
-    hexSeed = 20250718;
+    hexSeed = 41;
   }
 
   const ICON_DIR = '<svg class="node__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h5l1.5 2h6.5v8h-13z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
@@ -185,7 +186,7 @@ export async function createInvoice(user, items) {
     li.classList.toggle("is-gone", n.state === "gone");
     const badge = li.querySelector(".node__badge");
     badge.hidden = !isDirty(n);
-    li.querySelector(".node__ghost-tag").textContent = n.ghostId ? `in ${n.ghostId}` : "";
+    li.querySelector(".node__ghost-tag").textContent = n.ghostId ? `#${n.ghostId}` : "";
     let sr = "";
     if (n.state === "ghost") sr = `, deleted, saved in snapshot ${n.ghostId}`;
     else if (isDirty(n)) sr = ", modified";
@@ -306,7 +307,10 @@ export async function createInvoice(user, items) {
       const hit = new Set();
       for (const t of targets) {
         if (t === "/" || t === "/*") return text(`rm: it is dangerous to operate recursively on '/'\nrm: use --no-preserve-root to override this failsafe`, "ln--err");
-        if (t === "~" || t === "~/") return text("rm: refusing to delete your home directory in a browser demo. Try rm -rf *", "ln--dim");
+        if (t === "~" || t === "~/") {
+          line(`<span class="y">oopsy</span> <span class="d">not saved: too broad to snapshot (it contains the whole home directory)</span>`, "ln--oops");
+          return text("This is a browser demo, so your home folder lives to see another day. Try rm -rf *", "ln--dim");
+        }
         if (t === "." || t === ".." || t === "./") return text(`rm: "." and ".." may not be removed`, "ln--err");
         let matched = [];
         if (t === "*" || t === "./*") matched = childrenOf("").filter((n) => !n.name.startsWith("."));
@@ -403,7 +407,7 @@ export async function createInvoice(user, items) {
   function snapshot(cmd, kind, items, count) {
     const id = newId();
     snapshots.push({ id, cmd, kind, items, count, at: Date.now(), restored: false });
-    line(`<span class="y">oopsy</span> <span class="d">saved ${plural(count, "file")} before</span> ${esc(cmd)} <span class="d">as</span> <span class="y">${id}</span><span class="d">. Undo with</span> <span class="y">oops</span>`, "ln--oops");
+    line(`<span class="y">oopsy</span> <span class="d">saved ${plural(count, "file")} before</span> ${esc(cmd)} <span class="d">as snapshot</span> <span class="y">${id}</span><span class="d">. Undo with</span> <span class="y">oops</span>`, "ln--oops");
     return id;
   }
 
@@ -424,7 +428,7 @@ export async function createInvoice(user, items) {
       restoreAnim(back.filter((n) => n.state === "present"));
     }
     order.forEach(paintNode);
-    line(`<span class="g">restored</span> ${plural(s.count, "file")} from <span class="y">${s.id}</span> <span class="d">(${esc(s.cmd)}, ${ago(s.at)})</span>`, "ln--ok");
+    line(`<span class="g">restored</span> ${plural(s.count, "file")} from snapshot <span class="y">${s.id}</span> <span class="d">(${esc(s.cmd)}, ${ago(s.at)})</span>`, "ln--ok");
     updateChips();
   }
 
