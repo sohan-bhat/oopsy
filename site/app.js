@@ -352,7 +352,11 @@ export async function createInvoice(user, items) {
     },
 
     oops(args) {
-      if (!oopsyOn) return text("zsh: command not found: oops", "ln--err");
+      if (!oopsyOn) {
+        text("zsh: command not found: oops", "ln--err");
+        if (order.some((n) => n.state === "gone")) line(`<span class="d"># Gone for good. Turn Oopsy on and press Reset to try again.</span>`);
+        return;
+      }
       const sub = args[0];
       if (!sub) return undo(latestUndoable());
       if (sub === "list" || sub === "ls") return list();
