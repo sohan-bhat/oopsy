@@ -185,11 +185,14 @@ func altName(dst string, id int) string {
 
 // place clones src to dst, falling back to a copy.
 func place(src, dst string) error {
-	err := cloneTree(src, dst)
+	skipped, err := cloneTree(src, dst)
 	if errors.Is(err, errNoClone) {
-		return copyTree(src, dst, cloneFile)
+		skipped, err = copyTree(src, dst, cloneFile)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return skipError(skipped)
 }
 
 func sameContent(a, b string, afi, bfi os.FileInfo) bool {

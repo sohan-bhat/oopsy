@@ -34,9 +34,9 @@ func reflinkFile(src, dst string, fi os.FileInfo) error {
 
 // cloneTree reflinks every file in src into dst (btrfs, xfs, bcachefs).
 // It returns errNoClone before writing anything if reflinks do not work.
-func cloneTree(src, dst string) error {
+func cloneTree(src, dst string) ([]Skip, error) {
 	if forceCopy {
-		return errNoClone
+		return nil, errNoClone
 	}
 	probe := ""
 	_ = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
@@ -50,18 +50,18 @@ func cloneTree(src, dst string) error {
 		tmp := dst + ".probe"
 		fi, err := os.Lstat(probe)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := reflinkFile(probe, tmp, fi); err != nil {
-			return errNoClone
+			return nil, errNoClone
 		}
 		os.Remove(tmp)
 	}
-	err := copyTree(src, dst, reflinkFile)
+	skipped, err := copyTree(src, dst, reflinkFile)
 	if errors.Is(err, errNoClone) {
 		_ = forceRemove(dst)
 	}
-	return err
+	return skipped, err
 }
 
 func statAtime(st *syscall.Stat_t) time.Time {

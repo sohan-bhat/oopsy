@@ -88,8 +88,9 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 			e.ParentMtime = pfi.ModTime().UnixNano()
 		}
 		dst := filepath.Join(s.Dir(), e.Store)
-		err = cloneTree(p, dst)
+		skipped, err := cloneTree(p, dst)
 		if err == nil {
+			s.Skipped = append(s.Skipped, skipped...)
 			e.Method = cloneMethod
 			e.Size, e.Files, _ = treeSize(dst)
 		} else if errors.Is(err, errNoClone) {
@@ -100,11 +101,13 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 					human(size), human(budget), ConfigPath())})
 				continue
 			}
-			if err := copyTree(p, dst, cloneFile); err != nil {
-				s.Skipped = append(s.Skipped, Skip{Path: p, Reason: "copy failed: " + err.Error()})
+			skipped, err := copyTree(p, dst, cloneFile)
+			if err != nil {
+				s.Skipped = append(s.Skipped, Skip{Path: p, Reason: "copy failed: " + skipReason(err)})
 				_ = forceRemove(dst)
 				continue
 			}
+			s.Skipped = append(s.Skipped, skipped...)
 			budget -= size
 			e.Method, e.Size, e.Files = "copy", size, n
 		} else {

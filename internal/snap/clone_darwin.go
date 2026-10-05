@@ -1,7 +1,6 @@
 package snap
 
 import (
-	"errors"
 	"os"
 	"syscall"
 	"time"
@@ -14,20 +13,19 @@ const cloneMethod = "clone"
 
 // cloneTree makes an APFS copy on write clone of src at dst. Directories are
 // cloned recursively by the kernel in one call.
-func cloneTree(src, dst string) error {
+func cloneTree(src, dst string) ([]Skip, error) {
 	if forceCopy {
-		return errNoClone
+		return nil, errNoClone
 	}
 	err := unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW)
 	if err == nil {
 		fixDirTimes(src, dst)
-		return nil
+		return nil, nil
 	}
-	if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EXDEV) || errors.Is(err, unix.EINVAL) {
-		_ = forceRemove(dst)
-		return errNoClone
-	}
-	return err
+	// Anything else (such as an unreadable file inside the tree) falls back
+	// to the copy path, which saves what it can and reports the rest.
+	_ = forceRemove(dst)
+	return nil, errNoClone
 }
 
 func statAtime(st *syscall.Stat_t) time.Time {

@@ -65,3 +65,28 @@ func fixDirTimes(src, dst string) {
 		return nil
 	})
 }
+
+func kindOf(fi os.FileInfo) string {
+	switch m := fi.Mode(); {
+	case m&os.ModeSymlink != 0:
+		return kindSymlink
+	case m.IsDir():
+		return kindDir
+	case m.IsRegular():
+		return kindFile
+	}
+	return kindOther
+}
+
+// copyLink recreates the symlink src at dst.
+func copyLink(src, dst string, fi os.FileInfo) error {
+	target, err := os.Readlink(src)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(target, dst)
+}
+
+// isLocked reports a file another program holds exclusively. Unix has no
+// mandatory locks that stop reading, so this never happens there.
+func isLocked(error) bool { return false }
