@@ -527,3 +527,37 @@ func BenchmarkClassifyDestructive(b *testing.B) {
 		Classify("cd /tmp && rm -rf ./build *.log", cwd, env)
 	}
 }
+
+// TestDeleteOnly checks which actions may be snapshotted with hard links:
+// only commands that unlink paths without ever writing into them.
+func TestDeleteOnly(t *testing.T) {
+	dir := fixture(t)
+	env := baseEnv(dir)
+	for cmd, want := range map[string]bool{
+		"rm -rf dir1":                           true,
+		"rm a.txt":                              true,
+		"unlink a.txt":                          true,
+		"rmdir emptydir":                        true,
+		"find . -name '*.log' -delete":          true,
+		"find . -name '*.log' -exec rm {} +":    true,
+		"git rm a.txt":                          true,
+		"shred -u a.txt":                        false,
+		"echo x > a.txt":                        false,
+		"cp b.txt a.txt":                        false,
+		"mv b.txt a.txt":                        false,
+		"sed -i s/a/b/ a.txt":                   false,
+		"truncate -s 0 a.txt":                   false,
+		"find . -name '*.log' -exec shred {} +": false,
+	} {
+		res := Classify(cmd, dir, env)
+		if !res.Destructive() {
+			t.Errorf("%q: not destructive", cmd)
+			continue
+		}
+		for _, a := range res.Actions {
+			if a.Delete != want {
+				t.Errorf("%q: %s Delete=%v, want %v", cmd, a.Program, a.Delete, want)
+			}
+		}
+	}
+}

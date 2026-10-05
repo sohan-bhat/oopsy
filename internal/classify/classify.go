@@ -39,6 +39,9 @@ type Action struct {
 	Git     *GitOp   `json:"git,omitempty"`
 	Broad   bool     `json:"broad,omitempty"` // targets could not be resolved, a whole directory is saved instead
 	Note    string   `json:"note,omitempty"`
+	// Delete means the command only unlinks Paths and never writes into
+	// them, so a hard link is a safe snapshot. Overwrites leave it false.
+	Delete bool `json:"delete,omitempty"`
 }
 
 // Result is the outcome of classifying a command line.
@@ -515,8 +518,12 @@ func (s *state) dispatchExtra(argv []string) {
 }
 
 func (s *state) broad(name, note string) {
-	s.add(Action{Program: name, Paths: []string{s.cwd}, Broad: true, Note: note})
+	s.add(Action{Program: name, Paths: []string{s.cwd}, Broad: true, Note: note, Delete: deleteCommands[name]})
 }
+
+// deleteCommands only remove files. shred is missing on purpose: it
+// overwrites the data in place before unlinking.
+var deleteCommands = map[string]bool{"rm": true, "srm": true, "unlink": true, "rmdir": true}
 
 var pathCommands = map[string]bool{"rm": true, "srm": true, "mv": true, "cp": true, "ln": true, "install": true, "shred": true,
 	"unlink": true, "rmdir": true, "truncate": true, "sed": true, "perl": true, "tee": true, "dd": true, "find": true, "rsync": true}
@@ -724,13 +731,13 @@ func hRm(s *state, name string, args []string) {
 		paths = append(paths, t)
 	}
 	if len(paths) > 0 {
-		s.add(Action{Program: name, Paths: paths})
+		s.add(Action{Program: name, Paths: paths, Delete: true})
 	}
 }
 
 func hSimple(s *state, name string, args []string) {
 	if paths := s.pathTargets(operands(args, "")); len(paths) > 0 {
-		s.add(Action{Program: name, Paths: paths})
+		s.add(Action{Program: name, Paths: paths, Delete: deleteCommands[name]})
 	}
 }
 
@@ -754,7 +761,7 @@ func hRmdir(s *state, name string, args []string) {
 		}
 	}
 	if len(paths) > 0 {
-		s.add(Action{Program: name, Paths: paths})
+		s.add(Action{Program: name, Paths: paths, Delete: true})
 	}
 }
 
@@ -1018,6 +1025,7 @@ func hFind(s *state, name string, args []string) {
 	}
 	expr := args[i:]
 	destructive := false
+	onlyDeletes := true
 	safeToDryRun := true
 	var dry []string
 	for j := 0; j < len(expr); j++ {
@@ -1033,9 +1041,11 @@ func hFind(s *state, name string, args []string) {
 			}
 			if j+1 < len(expr) && findDestructiveExec[progName(expr[j+1])] {
 				destructive = true
+				onlyDeletes = onlyDeletes && deleteCommands[progName(expr[j+1])]
 				dry = append(dry, "-print")
 			} else if j+1 < len(expr) && (expr[j+1] == "sh" || expr[j+1] == "bash") {
 				destructive = true
+				onlyDeletes = false
 				safeToDryRun = false
 			} else {
 				safeToDryRun = false
@@ -1061,12 +1071,12 @@ func hFind(s *state, name string, args []string) {
 				paths = append(paths, s.abs(l))
 			}
 			if len(paths) > 0 {
-				s.add(Action{Program: name, Paths: paths, Note: "files matched by find"})
+				s.add(Action{Program: name, Paths: paths, Note: "files matched by find", Delete: onlyDeletes})
 			}
 			return
 		}
 	}
-	s.add(Action{Program: name, Paths: s.pathTargets(roots), Broad: true, Note: "find roots saved whole"})
+	s.add(Action{Program: name, Paths: s.pathTargets(roots), Broad: true, Note: "find roots saved whole", Delete: onlyDeletes})
 }
 
 func findDryRun(cwd string, head, expr []string) ([]string, bool) {
@@ -1285,7 +1295,7 @@ sub:
 			return
 		}
 		if paths := gs.pathTargets(p.operands); len(paths) > 0 {
-			s.add(Action{Program: "git rm", Paths: paths})
+			s.add(Action{Program: "git rm", Paths: paths, Delete: true})
 		}
 	case "mv":
 		p := parse(rest, "")
@@ -1300,7 +1310,7 @@ sub:
 		if len(rest) > 1 && rest[0] == "remove" {
 			ops := operands(rest[1:], "")
 			if paths := gs.pathTargets(ops); len(paths) > 0 {
-				s.add(Action{Program: "git worktree remove", Paths: paths})
+				s.add(Action{Program: "git worktree remove", Paths: paths, Delete: true})
 			}
 		}
 	}
