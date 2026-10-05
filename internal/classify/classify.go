@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -368,14 +369,11 @@ func (s *state) abs(p string) string {
 		return ""
 	}
 	if strings.HasPrefix(p, "~") {
-		if home, err := os.UserHomeDir(); err == nil && (p == "~" || strings.HasPrefix(p, "~/")) {
+		if home, err := os.UserHomeDir(); err == nil && (p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`)) {
 			p = home + p[1:]
 		}
 	}
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(s.cwd, p)
-	}
-	return filepath.Clean(p)
+	return absFrom(s.cwd, p)
 }
 
 // pathTargets turns raw operands into absolute paths. A trailing slash on a
@@ -1317,8 +1315,15 @@ sub:
 }
 
 func absFrom(base, p string) string {
+	if runtime.GOOS == "windows" {
+		p = msysPath(p, base)
+	}
 	if filepath.IsAbs(p) {
 		return filepath.Clean(p)
+	}
+	if runtime.GOOS == "windows" && len(p) > 0 && os.IsPathSeparator(p[0]) {
+		// \foo is relative to the root of the current drive.
+		return filepath.Clean(filepath.VolumeName(base) + p)
 	}
 	return filepath.Join(base, p)
 }
