@@ -46,7 +46,7 @@
       const span = document.createElement("span");
       span.className = word.includes("://") ? "w w--url" : "w";
       // URLs may only break right after a slash, never inside a word
-      word.split(/(?<=[^/]\/)(?=[^/])/).forEach((part, j) => {
+      (word.includes("://") ? word.split(/(?<=[^/]\/)(?=[^/])/) : [word]).forEach((part, j) => {
         if (j) span.appendChild(document.createElement("wbr"));
         const piece = document.createElement("span");
         piece.className = "w";

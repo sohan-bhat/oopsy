@@ -1,6 +1,6 @@
 # Oopsy
 
-**Undo almost anything in your terminal.** Deleted files, overwrites, `git reset --hard`, deleted branches, dropped stashes, force pushes, dropped tables, deleted rows. Oopsy snapshots it right before it is destroyed, whether you typed the command or your AI agent did. Type `oops` and it is back.
+**Undo for `rm -rf`, and everything else you wish you hadn't run.** Files (deletes and overwrites), git (resets, branches, stashes, force pushes) and Postgres (drops, deletes, bad updates). Oopsy snapshots it right before it is destroyed, whether you typed the command or your AI agent did. Type `oops` and it is back.
 
 Website: https://sohan-bhat.github.io/oopsy/
 
