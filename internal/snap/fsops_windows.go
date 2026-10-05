@@ -233,3 +233,22 @@ func createJunction(dst, target string) error {
 func isLocked(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
+
+const readOnlyAttr = windows.FILE_ATTRIBUTE_READONLY
+
+// fragileAttrs returns the attributes worth recording for a hard linked file:
+// Remove-Item -Force and del /f clear read only, hidden and system before
+// deleting, and that change shows through the snapshot's link too.
+func fragileAttrs(fi os.FileInfo) (uint32, bool) {
+	d := winData(fi)
+	if d == nil {
+		return 0, false
+	}
+	const fragile = windows.FILE_ATTRIBUTE_READONLY | windows.FILE_ATTRIBUTE_HIDDEN | windows.FILE_ATTRIBUTE_SYSTEM
+	if d.FileAttributes&fragile == 0 {
+		return 0, false
+	}
+	return d.FileAttributes & keptAttrs, true
+}
+
+func applyAttrs(p string, a uint32) { setAttrs(p, a) }
