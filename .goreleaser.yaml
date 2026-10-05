@@ -1,0 +1,38 @@
+# GoReleaser builds the release archives. The release itself is created with
+# gh release create (see scripts/release.sh).
+version: 2
+project_name: oopsy
+
+builds:
+  - id: oops
+    main: ./cmd/oops
+    binary: oops
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+  - id: oops-db
+    main: ./cmd/oops-db
+    binary: oops-db
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+
+archives:
+  - id: oopsy
+    ids: [oops, oops-db]
+    formats: [tar.gz]
+    name_template: "oopsy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+release:
+  disable: true

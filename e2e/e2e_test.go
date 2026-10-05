@@ -27,10 +27,12 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	bin = filepath.Join(dir, "oops")
-	build := exec.Command("go", "build", "-o", bin, "../cmd/oops")
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		panic(err)
+	for _, target := range []string{"oops", "oops-db"} {
+		build := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w", "-o", filepath.Join(dir, target), "../cmd/"+target)
+		build.Stderr = os.Stderr
+		if err := build.Run(); err != nil {
+			panic(err)
+		}
 	}
 	code := m.Run()
 	stopPG()
