@@ -137,6 +137,8 @@ type Snapshot struct {
 	Broad    bool        `json:"broad,omitempty"`
 	Millis   float64     `json:"millis"`
 	Restored *time.Time  `json:"restored,omitempty"`
+
+	vols map[string]string // volume root -> this snapshot's dir in its volume store
 }
 
 // Dir returns the snapshot's directory.
@@ -250,8 +252,18 @@ func appendJournal(s *Snapshot) {
 	w.Flush()
 }
 
-// Remove deletes a snapshot, including read only directories inside it.
-func Remove(id int) error { return forceRemove(SnapDir(id)) }
+// Remove deletes a snapshot, including read only directories inside it and
+// its data in volume stores.
+func Remove(id int) error {
+	if s, err := Load(id); err == nil {
+		for _, e := range s.Entries {
+			if e.Base != "" && filepath.Base(e.Base) == strconv.Itoa(id) {
+				_ = forceRemove(e.Base)
+			}
+		}
+	}
+	return forceRemove(SnapDir(id))
+}
 
 func forceRemove(p string) error {
 	if err := os.RemoveAll(p); err == nil {

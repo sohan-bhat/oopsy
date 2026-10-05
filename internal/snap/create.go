@@ -113,6 +113,7 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 		s.Files += e.Files
 	}
 
+	s.dropEmptyVolumeDirs()
 	if len(s.Entries) == 0 && len(s.Git) == 0 && len(s.Skipped) == 0 && len(s.Notes) == 0 {
 		_ = forceRemove(s.Dir())
 		return nil, nil
@@ -132,6 +133,9 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 // (NTFS compressed on Windows) within the copy budget.
 func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, error) {
 	p := e.Orig
+	if method != "copy" && !sameDevice(p, s.Dir()) {
+		e.Base = s.volumeDir(p)
+	}
 	dst := s.EntryPath(*e)
 	skipped, err := cloneTree(p, dst)
 	if err == nil {
@@ -159,6 +163,11 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, 
 			return append(skipped, Skip{Path: p, Reason: skipReason(err)}), err
 		}
 	}
+	if e.Base != "" {
+		_ = forceRemove(dst)
+		e.Base = "" // copies go to the main store
+		dst = s.EntryPath(*e)
+	}
 	size, n, _ := treeSize(p)
 	if size > *budget {
 		why := "this filesystem has no copy on write clones"
@@ -183,7 +192,7 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, 
 func refuse(p string) string {
 	home, _ := os.UserHomeDir()
 	oops := Dir()
-	if within(p, oops) {
+	if within(p, oops) || inVolumeStore(p) {
 		return "this is Oopsy's own storage"
 	}
 	if filepath.Dir(p) == p || (home != "" && within(home, p)) || within(oops, p) {
