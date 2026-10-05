@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -91,13 +92,16 @@ func Plural(n int, word string) string {
 func Confirm(question string) bool {
 	var in io.Reader = os.Stdin
 	var out io.Writer = os.Stderr
-	if !isatty.IsTerminal(os.Stdin.Fd()) {
-		tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if !stdinIsTerminal() {
+		tty, err := openTTY()
 		if err != nil {
 			return false
 		}
 		defer tty.Close()
-		in, out = tty, tty
+		in = tty
+		if runtime.GOOS != "windows" {
+			out = tty
+		}
 	}
 	fmt.Fprintf(out, "%s %s ", question, Dim("[y/N]"))
 	line, _ := bufio.NewReader(in).ReadString('\n')
@@ -107,10 +111,10 @@ func Confirm(question string) bool {
 
 // Interactive reports whether a person can answer a prompt.
 func Interactive() bool {
-	if isatty.IsTerminal(os.Stdin.Fd()) {
+	if stdinIsTerminal() {
 		return true
 	}
-	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	f, err := openTTY()
 	if err != nil {
 		return false
 	}
@@ -128,10 +132,31 @@ func Shorten(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
+// stdinIsTerminal is true for a console and for Git Bash's mintty.
+func stdinIsTerminal() bool {
+	return isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
+}
+
+// openTTY opens the controlling terminal even when stdin is redirected.
+func openTTY() (*os.File, error) {
+	if runtime.GOOS == "windows" {
+		// CONIN$ reads the console; prompts go to stderr, which is enough.
+		return os.OpenFile("CONIN$", os.O_RDWR, 0)
+	}
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+}
+
 // HomeRel replaces the home directory prefix with ~.
 func HomeRel(p string) string {
 	home, err := os.UserHomeDir()
-	if err == nil && home != "" && (p == home || strings.HasPrefix(p, home+"/")) {
+	if err != nil || home == "" || len(p) < len(home) {
+		return p
+	}
+	same := p[:len(home)] == home
+	if runtime.GOOS == "windows" {
+		same = strings.EqualFold(p[:len(home)], home)
+	}
+	if same && (len(p) == len(home) || os.IsPathSeparator(p[len(home)])) {
 		return "~" + p[len(home):]
 	}
 	return p

@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"runtime"
 
 	"github.com/spf13/cobra"
 )
@@ -33,16 +33,19 @@ Commands:
 			if err != nil {
 				return err
 			}
-			argv := append([]string{bin}, args...)
-			return syscall.Exec(bin, argv, os.Environ())
+			return execDB(bin, args)
 		},
 	}
 }
 
 func findDBBinary() (string, error) {
 	if self, err := os.Executable(); err == nil {
+		name := "oops-db"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
 		for _, s := range []string{self, resolve(self)} {
-			p := filepath.Join(filepath.Dir(s), "oops-db")
+			p := filepath.Join(filepath.Dir(s), name)
 			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 				return p, nil
 			}
