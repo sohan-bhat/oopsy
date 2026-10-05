@@ -26,9 +26,9 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	bin = filepath.Join(dir, "oops")
+	bin = filepath.Join(dir, exe("oops"))
 	for _, target := range []string{"oops", "oops-db"} {
-		build := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w", "-o", filepath.Join(dir, target), "../cmd/"+target)
+		build := exec.Command("go", "build", "-trimpath", "-ldflags", "-s -w", "-o", filepath.Join(dir, exe(target)), "../cmd/"+target)
 		build.Stderr = os.Stderr
 		if err := build.Run(); err != nil {
 			panic(err)
@@ -70,10 +70,15 @@ func forceRemove(p string) {
 func (e *env) environ() []string {
 	var out []string
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "OOPS_HOME=") || strings.HasPrefix(kv, "NO_COLOR=") {
+		k, _, _ := strings.Cut(kv, "=")
+		switch strings.ToUpper(k) {
+		case "HOME", "OOPS_HOME", "NO_COLOR", "USERPROFILE", "OOPS_DOCUMENTS_DIR":
 			continue
 		}
 		out = append(out, kv)
+	}
+	if onWindows {
+		out = append(out, "USERPROFILE="+e.home, "OOPS_DOCUMENTS_DIR="+filepath.Join(e.home, "Documents"))
 	}
 	return append(out, "HOME="+e.home, "OOPS_HOME="+e.oops, "NO_COLOR=1",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_NOSYSTEM=1")
@@ -103,7 +108,7 @@ func (e *env) mustOops(args ...string) string {
 // sh runs a command the way a user would.
 func (e *env) sh(cmd string) string {
 	e.t.Helper()
-	c := exec.Command("/bin/sh", "-c", cmd)
+	c := exec.Command(posixShell(), "-c", cmd)
 	c.Dir = e.work
 	c.Env = e.environ()
 	out, err := c.CombinedOutput()
@@ -588,9 +593,13 @@ func TestBashHookRunsInRealShell(t *testing.T) {
 	os.WriteFile(filepath.Join(e.work, "keep.txt"), []byte("bash keeps this\n"), 0o644)
 	init := e.mustOops("shell-init", "bash")
 	script := init + "\nrm -f keep.txt\n"
-	c := exec.Command("bash", "-c", script)
+	shell := "bash"
+	if onWindows {
+		shell = gitBash()
+	}
+	c := exec.Command(shell, "-c", script)
 	c.Dir = e.work
-	c.Env = append(e.environ(), "PATH="+filepath.Dir(bin)+":"+os.Getenv("PATH"))
+	c.Env = append(e.environ(), pathWith(filepath.Dir(bin)))
 	out, err := c.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bash: %v %s", err, out)
@@ -616,7 +625,7 @@ func TestZshHookRunsInRealShell(t *testing.T) {
 	// An interactive zsh reading commands from stdin runs preexec hooks.
 	c := exec.Command("zsh", "-f", "-i")
 	c.Dir = e.work
-	c.Env = append(e.environ(), "PATH="+filepath.Dir(bin)+":"+os.Getenv("PATH"))
+	c.Env = append(e.environ(), pathWith(filepath.Dir(bin)))
 	c.Stdin = strings.NewReader("source " + initFile + "\nrm -f keep.txt\nexit\n")
 	out, _ := c.CombinedOutput()
 	if !strings.Contains(string(out), "saved snapshot") {
