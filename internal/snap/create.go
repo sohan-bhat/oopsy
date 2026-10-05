@@ -178,13 +178,22 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, 
 			why, human(size), human(*budget), ConfigPath())
 		return []Skip{{Path: p, Reason: err.Error()}}, err
 	}
+	if !s.compressTried {
+		// On NTFS, copies inherit compression from the folder they land in.
+		s.compressTried = true
+		compressDir(filepath.Dir(dst))
+	}
 	skipped, err = copyTree(p, dst, cloneFile)
 	if err != nil {
 		_ = forceRemove(dst)
 		return []Skip{{Path: p, Reason: "copy failed: " + skipReason(err)}}, err
 	}
 	*budget -= size
-	e.Method, e.Size, e.Files, e.Disk = "copy", size, n, size
+	e.Method, e.Size, e.Files = "copy", size, n
+	if isCompressed(dst) {
+		e.Method = "compressed copy"
+	}
+	e.Disk = diskUsage(dst)
 	return skipped, nil
 }
 
