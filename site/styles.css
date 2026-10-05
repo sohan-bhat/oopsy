@@ -124,6 +124,13 @@ button { font: inherit; color: inherit; }
 }
 .hero__lede { margin-top: 26px; font-size: 19px; line-height: 1.5; max-width: 34em; }
 .hero__lede code { background: rgba(35, 34, 40, .1); padding: .08em .3em; border-radius: 5px; white-space: nowrap; }
+.undoables { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-width: 36em; }
+.undoables li {
+  font-size: 14px; font-weight: 600; line-height: 1.2;
+  padding: 7px 11px; border: 2px solid var(--graphite); border-radius: 999px;
+  background: var(--paper, #FBFBFA); color: var(--graphite); white-space: nowrap;
+}
+.undoables li code { font-family: var(--f-mono); font-size: .95em; }
 
 /* install */
 .install { margin-top: 30px; max-width: 560px; }
