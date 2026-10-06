@@ -23,7 +23,7 @@ import (
 func fail(format string, a ...any) { ui.Errorf(format, a...) }
 
 var sourceLabels = map[string]string{
-	"zsh": "zsh", "bash": "bash", "fish": "fish", "shell": "shell",
+	"zsh": "zsh", "bash": "bash", "fish": "fish", "shell": "shell", "powershell": "PowerShell", "cmd": "cmd",
 	"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "gemini": "Gemini CLI", "manual": "manual",
 }
 

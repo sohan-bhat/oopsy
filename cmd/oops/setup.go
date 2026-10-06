@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -91,8 +93,15 @@ are set up unless you pass --all or --only. Every file is backed up to
 			_ = os.MkdirAll(snap.Dir(), 0o700)
 			fmt.Println()
 			if len(shells) > 0 {
-				sh := filepath.Base(os.Getenv("SHELL"))
-				fmt.Printf("Open a new terminal (or run %s) so your shell picks up the hook.\n", ui.Bold("exec "+sh))
+				if runtime.GOOS == "windows" {
+					fmt.Println("Open a new PowerShell or Git Bash window so it picks up the hook.")
+				} else {
+					sh := filepath.Base(os.Getenv("SHELL"))
+					fmt.Printf("Open a new terminal (or run %s) so your shell picks up the hook.\n", ui.Bold("exec "+sh))
+				}
+			}
+			if hint := executionPolicyHint(); hint != "" && slices.ContainsFunc(shells, isPowerShell) {
+				fmt.Println(ui.Warn(hint))
 			}
 			if codex {
 				fmt.Println("Codex asks you to trust new hooks once: run /hooks inside Codex and approve oopsy.")
@@ -101,7 +110,7 @@ are set up unless you pass --all or --only. Every file is backed up to
 			return nil
 		},
 	}
-	c.Flags().StringSliceVar(&only, "only", nil, "only these targets: zsh, bash, fish, claude, codex, cursor, gemini, shells, agents")
+	c.Flags().StringSliceVar(&only, "only", nil, "only these targets: zsh, bash, fish, powershell, windowspowershell, claude, codex, cursor, gemini, shells, agents")
 	c.Flags().BoolVar(&all, "all", false, "set up every target, even ones not detected")
 	return c
 }
@@ -154,10 +163,10 @@ func uninstallCmd() *cobra.Command {
 
 func shellInitCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:       "shell-init <zsh|bash|fish>",
+		Use:       "shell-init <zsh|bash|fish|powershell>",
 		Short:     "Print the shell hook (used by the line oops init adds to your rc file)",
 		Args:      cobra.ExactArgs(1),
-		ValidArgs: []string{"zsh", "bash", "fish"},
+		ValidArgs: []string{"zsh", "bash", "fish", "powershell"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := hooks.ShellInit(args[0], hooks.Bin())
 			if err != nil {
@@ -211,14 +220,39 @@ func statusCmd() *cobra.Command {
 }
 
 func storageKind() string {
+	limit := ui.Bytes(snap.LoadConfig().CopyCapBytes)
 	switch probeClone() {
 	case "clone":
 		return "APFS clones (instant, copy on write)"
 	case "reflink":
 		return "reflinks (instant, copy on write)"
-	default:
-		return fmt.Sprintf("plain copies, capped at %s per snapshot (this filesystem has no copy on write)", ui.Bytes(snap.LoadConfig().CopyCapBytes))
+	case "block clone":
+		return "ReFS block clones (instant, copy on write)"
 	}
+	if runtime.GOOS == "windows" {
+		return fmt.Sprintf("hard links for deletes (instant, no extra disk), NTFS compressed copies for overwrites, capped at %s per snapshot", limit)
+	}
+	return fmt.Sprintf("hard links for deletes (instant, no extra disk), plain copies for overwrites, capped at %s per snapshot", limit)
+}
+
+func isPowerShell(name string) bool { return name == "powershell" || name == "windowspowershell" }
+
+// executionPolicyHint explains how to let PowerShell load its profile when
+// the execution policy blocks scripts, as it does by default on Windows
+// client editions.
+func executionPolicyHint() string {
+	if runtime.GOOS != "windows" {
+		return ""
+	}
+	out, err := exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy").Output()
+	if err != nil {
+		return ""
+	}
+	switch p := strings.TrimSpace(string(out)); p {
+	case "Restricted", "AllSigned":
+		return "PowerShell's execution policy (" + p + ") stops profiles from loading. To allow it, run: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+	}
+	return ""
 }
 
 func probeClone() string {
@@ -272,13 +306,25 @@ func doctorCmd() *cobra.Command {
 				ok("storage", ui.HomeRel(snap.Dir()))
 			}
 			switch k := probeClone(); k {
-			case "clone", "reflink":
+			case "clone", "reflink", "block clone":
 				ok("copy on write", storageKind())
 			default:
-				warnf("copy on write", storageKind())
+				if runtime.GOOS == "windows" {
+					ok("copy on write", "not on NTFS; using "+storageKind())
+				} else {
+					warnf("copy on write", storageKind())
+				}
 			}
 			if cwd, err := os.Getwd(); err == nil && !snap.SameDevice(cwd, snap.Dir()) {
-				warnf("this directory", "is on a different volume than ~/.oops, so snapshots here are plain copies (capped)")
+				ok("this directory", "is on another volume than "+ui.HomeRel(snap.Dir())+"; hard links and clones go to a private store at that volume's root")
+			}
+			for _, t := range hooks.Targets() {
+				if t.Installed && isPowerShell(t.Name) {
+					if hint := executionPolicyHint(); hint != "" {
+						warnf("PowerShell", hint)
+					}
+					break
+				}
 			}
 			if _, err := exec.LookPath("git"); err != nil {
 				warnf("git", "not found; git snapshots are disabled")
