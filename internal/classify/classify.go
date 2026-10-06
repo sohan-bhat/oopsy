@@ -59,6 +59,17 @@ var quick = regexp.MustCompile(`(^|[^A-Za-z0-9_.-])(g?(rm|mv|cp|ln|sed|dd|tee|fi
 // obviously harmless commands without starting a process.
 const QuickPattern = `(^|[^A-Za-z0-9_.-])(g?(rm|mv|cp|ln|sed|dd|tee|find|shred|unlink|rmdir|truncate|install)|srm|git|rsync|perl|xargs)($|[^A-Za-z0-9_-])|>`
 
+// QuickPatternWindows is the prefilter for PowerShell and cmd.exe command
+// lines. It is matched case insensitively, and it is also valid .NET regex
+// syntax, so the PowerShell hook runs it with -match before starting any
+// process. It covers the Unix names too, since PowerShell aliases them.
+const QuickPatternWindows = `(^|[^a-z0-9_.-])(remove-item|ri|rm|del|erase|rd|rmdir|unlink|move-item|mi|mv|move|copy-item|cpi|cp|copy|xcopy|robocopy|set-content|sc|clear-content|clc|out-file|tee-object|tee|new-item|ni|git|sed|perl|find|xargs|truncate|shred|dd|install|ln|rsync|srm|iex|invoke-expression)($|[^a-z0-9_-])|>|::(delete|write|move|copy|replace)|\.delete\(|(powershell|pwsh)(\.exe)?\s(.*\s)?[-/]e`
+
+var quickWindows = regexp.MustCompile(`(?i)` + QuickPatternWindows)
+
+// MaybeDestructiveWindows is the prefilter for PowerShell and cmd.exe.
+func MaybeDestructiveWindows(cmd string) bool { return quickWindows.MatchString(cmd) }
+
 // MaybeDestructive is a cheap prefilter. False means the command is
 // certainly not destructive; true means it needs a full parse.
 func MaybeDestructive(cmd string) bool { return quick.MatchString(cmd) }
