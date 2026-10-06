@@ -10,8 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/sohan-bhat/oopsy/internal/snap"
 )
@@ -49,6 +51,14 @@ func Bin() string {
 	if err != nil {
 		return "oops"
 	}
+	if runtime.GOOS == "windows" {
+		// Scoop and other installers put a shim on PATH that runs the real
+		// exe from a versioned folder, so trust PATH rather than compare.
+		if _, err := exec.LookPath("oops"); err == nil {
+			return "oops"
+		}
+		return filepath.ToSlash(shortPath(self))
+	}
 	selfReal, _ := filepath.EvalSymlinks(self)
 	if p, err := exec.LookPath("oops"); err == nil {
 		if real, _ := filepath.EvalSymlinks(p); real == selfReal {
@@ -65,24 +75,42 @@ func Bin() string {
 func Targets() []Target {
 	h := home()
 	userShell := filepath.Base(os.Getenv("SHELL"))
+	win := runtime.GOOS == "windows"
+	psDir := filepath.Join(h, ".config", "powershell")
+	if win {
+		psDir = filepath.Join(documentsDir(), "PowerShell")
+	}
 	ts := []Target{
 		{Name: "zsh", Label: "zsh", Kind: "shell", Path: filepath.Join(h, ".zshrc")},
 		{Name: "bash", Label: "bash", Kind: "shell", Path: filepath.Join(h, ".bashrc")},
 		{Name: "fish", Label: "fish", Kind: "shell", Path: filepath.Join(h, ".config", "fish", "conf.d", "oopsy.fish")},
-		{Name: "claude", Label: "Claude Code", Kind: "agent", Path: filepath.Join(h, ".claude", "settings.json")},
-		{Name: "codex", Label: "Codex CLI", Kind: "agent", Path: filepath.Join(h, ".codex", "hooks.json")},
-		{Name: "cursor", Label: "Cursor", Kind: "agent", Path: filepath.Join(h, ".cursor", "hooks.json")},
-		{Name: "gemini", Label: "Gemini CLI", Kind: "agent", Path: filepath.Join(h, ".gemini", "settings.json")},
+		{Name: "powershell", Label: "PowerShell", Kind: "shell", Path: filepath.Join(psDir, "profile.ps1")},
 	}
+	if win {
+		ts[1].Label = "Git Bash"
+		ts = append(ts, Target{Name: "windowspowershell", Label: "Windows PowerShell", Kind: "shell",
+			Path: filepath.Join(documentsDir(), "WindowsPowerShell", "profile.ps1")})
+	}
+	ts = append(ts,
+		Target{Name: "claude", Label: "Claude Code", Kind: "agent", Path: filepath.Join(h, ".claude", "settings.json")},
+		Target{Name: "codex", Label: "Codex CLI", Kind: "agent", Path: filepath.Join(h, ".codex", "hooks.json")},
+		Target{Name: "cursor", Label: "Cursor", Kind: "agent", Path: filepath.Join(h, ".cursor", "hooks.json")},
+		Target{Name: "gemini", Label: "Gemini CLI", Kind: "agent", Path: filepath.Join(h, ".gemini", "settings.json")},
+	)
 	for i := range ts {
 		t := &ts[i]
 		switch t.Name {
 		case "zsh":
 			t.Detected = exists(t.Path) || userShell == "zsh"
 		case "bash":
-			t.Detected = exists(t.Path) || userShell == "bash"
+			t.Detected = exists(t.Path) || userShell == "bash" || (win && gitBashInstalled())
 		case "fish":
 			t.Detected = exists(filepath.Join(h, ".config", "fish")) || userShell == "fish"
+		case "powershell":
+			_, err := exec.LookPath("pwsh")
+			t.Detected = exists(t.Path) || err == nil
+		case "windowspowershell":
+			t.Detected = true // part of every Windows install
 		default:
 			t.Detected = exists(filepath.Dir(t.Path))
 		}
@@ -91,16 +119,28 @@ func Targets() []Target {
 	return ts
 }
 
+func gitBashInstalled() bool {
+	if exists(filepath.Join(os.Getenv("ProgramFiles"), "Git", "bin", "bash.exe")) {
+		return true
+	}
+	p, err := exec.LookPath("bash")
+	return err == nil && !strings.Contains(strings.ToLower(p), `\system32\`)
+}
+
 func installed(t Target) bool {
 	b, err := os.ReadFile(t.Path)
 	if err != nil {
 		return false
 	}
 	if t.Kind == "shell" {
-		return bytes.Contains(b, []byte(blockStart)) || (t.Name == "fish" && bytes.Contains(b, []byte("oops")))
+		text := installedText(b)
+		return strings.Contains(text, blockStart) || (t.Name == "fish" && strings.Contains(text, "oops"))
 	}
 	return bytes.Contains(b, []byte(" hook "+t.Name))
 }
+
+// installedText reads a profile in any encoding.
+func installedText(b []byte) string { s, _ := decodeText(b); return s }
 
 func backup(path string) (string, error) {
 	b, err := os.ReadFile(path)
@@ -114,7 +154,11 @@ func backup(path string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	name := strings.ReplaceAll(strings.TrimPrefix(path, home()+"/"), "/", "_")
+	rel, err := filepath.Rel(home(), path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		rel = path[len(filepath.VolumeName(path)):]
+	}
+	name := strings.NewReplacer("/", "_", `\`, "_", ":", "_").Replace(strings.TrimLeft(rel, `/\`))
 	dst := filepath.Join(dir, name)
 	return dst, os.WriteFile(dst, b, 0o600)
 }
@@ -175,7 +219,11 @@ func Uninstall(t Target) (string, error) {
 		if err != nil {
 			return bk, err
 		}
-		return bk, writeKeepMode(t.Path, removeBlock(b))
+		out := removeBlock(b)
+		if strings.TrimSpace(installedText(out)) == "" {
+			return bk, os.Remove(t.Path) // the file only held our hook
+		}
+		return bk, writeKeepMode(t.Path, out)
 	}
 	return bk, editJSON(t.Path, func(o *obj) { removeAgentHook(o, t.Name) })
 }
@@ -186,22 +234,38 @@ func installShell(t Target, bin string) error {
 		return writeKeepMode(t.Path, []byte(body))
 	}
 	var line string
-	if bin == "oops" {
+	switch {
+	case t.Name == "powershell" || t.Name == "windowspowershell":
+		if bin == "oops" {
+			line = `if (Get-Command oops -ErrorAction SilentlyContinue) { oops shell-init powershell | Out-String | Invoke-Expression }`
+		} else {
+			line = fmt.Sprintf(`if (Test-Path %s) { & %s shell-init powershell | Out-String | Invoke-Expression }`, psQuote(bin), psQuote(bin))
+		}
+	case bin == "oops":
 		line = fmt.Sprintf(`if command -v oops >/dev/null 2>&1; then eval "$(oops shell-init %s)"; fi`, t.Name)
-	} else {
+	default:
 		line = fmt.Sprintf(`if [ -x %s ]; then eval "$(%s shell-init %s)"; fi`, shQuote(bin), shQuote(bin), t.Name)
 	}
-	block := fmt.Sprintf("\n%s\n# Snapshots destructive commands so you can undo them with: oops\n%s\n%s\n", blockStart, line, blockEnd)
-	b, _ := os.ReadFile(t.Path)
-	b = append(bytes.TrimRight(b, "\n"), []byte("\n"+block)...)
-	if len(bytes.TrimSpace(b)) == len(bytes.TrimSpace([]byte(block))) {
-		b = []byte(strings.TrimLeft(block, "\n"))
+	raw, _ := os.ReadFile(t.Path)
+	text, enc := decodeText(raw)
+	nl := "\n"
+	if strings.Contains(text, "\r\n") || (text == "" && strings.HasSuffix(t.Path, ".ps1") && runtime.GOOS == "windows") {
+		nl = "\r\n"
 	}
-	return writeKeepMode(t.Path, b)
+	block := strings.Join([]string{blockStart, "# Snapshots destructive commands so you can undo them with: oops", line, blockEnd}, nl) + nl
+	text = strings.TrimRight(text, "\r\n")
+	if text == "" {
+		text = block
+	} else {
+		text += nl + nl + block
+	}
+	return writeKeepMode(t.Path, encodeText(text, enc))
 }
 
+// removeBlock takes our block (and the blank line before it) out of a file,
+// keeping its encoding and line endings.
 func removeBlock(b []byte) []byte {
-	s := string(b)
+	s, enc := decodeText(b)
 	for {
 		i := strings.Index(s, blockStart)
 		if i < 0 {
@@ -212,14 +276,55 @@ func removeBlock(b []byte) []byte {
 			break
 		}
 		end := i + j + len(blockEnd)
-		if end < len(s) && s[end] == '\n' {
+		if strings.HasPrefix(s[end:], "\r\n") {
+			end += 2
+		} else if strings.HasPrefix(s[end:], "\n") {
 			end++
 		}
 		start := i
-		if start > 0 && s[start-1] == '\n' && (start < 2 || s[start-2] == '\n') {
-			start-- // drop the blank line we added before the block
+		for _, blank := range []string{"\r\n\r\n", "\n\n"} {
+			if strings.HasSuffix(s[:start], blank) {
+				start -= len(blank) / 2 // drop the blank line we added before the block
+				break
+			}
 		}
 		s = s[:start] + s[end:]
+	}
+	return encodeText(s, enc)
+}
+
+// Text encodings found in shell profiles. Windows PowerShell editors often
+// save profiles as UTF-16 or with a UTF-8 byte order mark.
+const (
+	encUTF8 = iota
+	encUTF8BOM
+	encUTF16LE
+)
+
+func decodeText(b []byte) (string, int) {
+	switch {
+	case bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}):
+		return string(b[3:]), encUTF8BOM
+	case bytes.HasPrefix(b, []byte{0xFF, 0xFE}):
+		u := make([]uint16, (len(b)-2)/2)
+		for i := range u {
+			u[i] = uint16(b[2+2*i]) | uint16(b[3+2*i])<<8
+		}
+		return string(utf16.Decode(u)), encUTF16LE
+	}
+	return string(b), encUTF8
+}
+
+func encodeText(s string, enc int) []byte {
+	switch enc {
+	case encUTF8BOM:
+		return append([]byte{0xEF, 0xBB, 0xBF}, s...)
+	case encUTF16LE:
+		out := []byte{0xFF, 0xFE}
+		for _, u := range utf16.Encode([]rune(s)) {
+			out = append(out, byte(u), byte(u>>8))
+		}
+		return out
 	}
 	return []byte(s)
 }
@@ -244,7 +349,24 @@ func editJSON(path string, fn func(o *obj)) error {
 	return writeKeepMode(path, out)
 }
 
-func hookCommand(bin, name string) string { return shQuote(bin) + " hook " + name }
+// hookCommand is the command line an agent runs. On Windows agents may run
+// it through cmd, PowerShell or Git Bash, so the path is never quoted: it is
+// either the bare name on PATH or a short path without spaces.
+func hookCommand(bin, name string) string {
+	if runtime.GOOS == "windows" {
+		return bin + " hook " + name
+	}
+	return shQuote(bin) + " hook " + name
+}
+
+// agentMatcher is the Claude Code and Codex tool matcher. Claude Code on
+// Windows can also run commands with a PowerShell tool.
+func agentMatcher() string {
+	if runtime.GOOS == "windows" {
+		return "Bash|PowerShell"
+	}
+	return "Bash"
+}
 
 func addAgentHook(o *obj, name, bin string) {
 	cmd := hookCommand(bin, name)
@@ -253,7 +375,7 @@ func addAgentHook(o *obj, name, bin string) {
 		h := o.child("hooks")
 		list, _ := h.vals["PreToolUse"].([]any)
 		entry := newObj()
-		entry.set("matcher", "Bash")
+		entry.set("matcher", agentMatcher())
 		hk := newObj()
 		hk.set("type", "command")
 		hk.set("command", cmd)
