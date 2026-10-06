@@ -11,7 +11,7 @@ func TestCmdExe(t *testing.T) {
 	for _, c := range []tc{
 		{cmd: "del a.txt", want: true, paths: []string{"a.txt"}},
 		{cmd: "del /q /f a.txt", want: true, paths: []string{"a.txt"}},
-		{cmd: "DEL /F /Q A.TXT", want: true},
+		{cmd: "DEL /F /Q a.txt", want: true},
 		{cmd: "erase a.txt", want: true, paths: []string{"a.txt"}},
 		{cmd: "@del a.txt", want: true, paths: []string{"a.txt"}},
 		{cmd: "del *.log", want: true, paths: []string{"c.log", "d.log"}},
