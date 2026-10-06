@@ -71,7 +71,14 @@ func startPG() {
 	if onWindows {
 		opts = fmt.Sprintf("-p %d -c listen_addresses=127.0.0.1 -c fsync=off", port)
 	}
-	out, err = exec.Command(pgCtlBin, "-D", data, "-o", opts, "-l", filepath.Join(pgDir, "log"), "-w", "start").CombinedOutput()
+	// The server inherits pg_ctl's output handles, so capturing them in a
+	// pipe would wait for the server to exit. Use a file.
+	ctlLog, _ := os.Create(filepath.Join(pgDir, "pg_ctl.out"))
+	start := exec.Command(pgCtlBin, "-D", data, "-o", opts, "-l", filepath.Join(pgDir, "log"), "-w", "start")
+	start.Stdout, start.Stderr = ctlLog, ctlLog
+	err = start.Run()
+	ctlLog.Close()
+	out, _ = os.ReadFile(filepath.Join(pgDir, "pg_ctl.out"))
 	if err != nil {
 		pgErr = fmt.Errorf("pg_ctl start: %v %s", err, out)
 		return
