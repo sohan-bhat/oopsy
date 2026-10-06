@@ -899,11 +899,11 @@ func hTee(s *state, name string, args []string) {
 func hDd(s *state, name string, args []string) {
 	for _, a := range args {
 		if strings.HasPrefix(a, "of=") {
-			t := s.abs(a[3:])
-			if strings.HasPrefix(t, "/dev/") {
-				s.add(Action{Program: name, Note: "writes to a device, which cannot be snapshotted: " + t})
+			if strings.HasPrefix(a[3:], "/dev/") || strings.HasPrefix(a[3:], `\\.\`) {
+				s.add(Action{Program: name, Note: "writes to a device, which cannot be snapshotted: " + a[3:]})
 				return
 			}
+			t := s.abs(a[3:])
 			if exists(t) {
 				s.add(Action{Program: name, Paths: []string{t}})
 			}
@@ -1088,11 +1088,32 @@ func hFind(s *state, name string, args []string) {
 	s.add(Action{Program: name, Paths: s.pathTargets(roots), Broad: true, Note: "find roots saved whole", Delete: onlyDeletes})
 }
 
+// posixFind locates GNU or BSD find. On Windows, find.exe in System32 is
+// an unrelated text search, so Git for Windows' copy is used.
+func posixFind() string {
+	if runtime.GOOS != "windows" {
+		return "find"
+	}
+	for _, root := range []string{os.Getenv("ProgramFiles"), `C:\Program Files`} {
+		if p := filepath.Join(root, "Git", "usr", "bin", "find.exe"); exists(p) {
+			return p
+		}
+	}
+	if p, err := exec.LookPath("find"); err == nil && !strings.Contains(strings.ToLower(p), `\system32\`) {
+		return p
+	}
+	return ""
+}
+
 func findDryRun(cwd string, head, expr []string) ([]string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	argv := append(append([]string{}, head...), expr...)
-	cmd := exec.CommandContext(ctx, "find", argv...)
+	findBin := posixFind()
+	if findBin == "" {
+		return nil, false
+	}
+	cmd := exec.CommandContext(ctx, findBin, argv...)
 	cmd.Dir = cwd
 	var out bytes.Buffer
 	cmd.Stdout = &out
