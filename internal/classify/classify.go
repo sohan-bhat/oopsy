@@ -7,6 +7,7 @@ package classify
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -1388,4 +1389,20 @@ func checkoutPaths(s *state, args []string) []string {
 		return before
 	}
 	return before[1:]
+}
+
+// Merge combines results from several parsers, dropping duplicate actions.
+func Merge(results ...Result) Result {
+	var out Result
+	seen := map[string]bool{}
+	for _, r := range results {
+		for _, a := range r.Actions {
+			b, _ := json.Marshal(a)
+			if !seen[string(b)] {
+				seen[string(b)] = true
+				out.Actions = append(out.Actions, a)
+			}
+		}
+	}
+	return out
 }
