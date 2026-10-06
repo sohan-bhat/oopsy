@@ -26,6 +26,10 @@ func (ps *psState) native(name string, rest []psTok) {
 		bs := newState(ps.cwd, ps.rawEnv)
 		hGit(bs, "git", argv)
 		ps.actions = append(ps.actions, bs.actions...)
+	case "cmd":
+		if line := cmdSlashC(argv); line != "" {
+			ps.actions = append(ps.actions, ClassifyCmd(line, ps.cwd, ps.rawEnv).Actions...)
+		}
 	case "pwsh", "powershell":
 		if script := psCommandArg(argv); script != "" {
 			c := ps.child()
@@ -40,6 +44,10 @@ func (ps *psState) native(name string, rest []psTok) {
 			bs.shellC(argv)
 		}
 		ps.actions = append(ps.actions, bs.actions...)
+	case "robocopy", "xcopy":
+		cs := newCmd(ps.cwd, ps.rawEnv)
+		cs.dispatch(append([]string{name}, argv...))
+		ps.actions = append(ps.actions, cs.actions...)
 	}
 }
 
