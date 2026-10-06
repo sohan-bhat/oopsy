@@ -3,6 +3,7 @@ package classify
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -61,6 +62,103 @@ func (ps *psState) pathAction(program string, vals, literal []psValue, input *ps
 	if broad || (unresolved && len(paths) == 0) {
 		ps.actions = append(ps.actions, Action{Program: program, Paths: []string{ps.cwd}, Broad: true, Delete: del,
 			Note: "some targets are only known when the command runs, so the current folder is saved"})
+	}
+}
+
+func (ps *psState) copyMove(name string, a psArgs, input *psInput) {
+	program := map[string]string{"move-item": "Move-Item", "copy-item": "Copy-Item"}[name]
+	dest := a.named["destination"]
+	srcVals := a.named["path"]
+	if len(srcVals) == 0 && len(a.positional) > 0 && len(a.named["literalpath"]) == 0 {
+		srcVals = a.positional[0]
+	}
+	if len(dest) == 0 {
+		pos := 1
+		if len(a.named["path"]) > 0 || len(a.named["literalpath"]) > 0 {
+			pos = 0
+		}
+		if pos < len(a.positional) {
+			dest = a.positional[pos]
+		}
+	}
+	if len(dest) == 0 {
+		dest = []psValue{{s: ps.cwd, ok: true, literal: true}}
+	}
+	if !dest[0].ok {
+		ps.actions = append(ps.actions, Action{Program: program, Paths: []string{ps.cwd}, Broad: true, Note: "destination is only known when the command runs"})
+		return
+	}
+	var srcs []string
+	for _, v := range append(srcVals, a.named["literalpath"]...) {
+		if strings.Contains(v.s, psItem) && input != nil && input.known {
+			srcs = append(srcs, input.paths...)
+		} else if v.ok {
+			srcs = append(srcs, psResolve(v.s, ps.cwd))
+		}
+	}
+	if len(srcVals)+len(a.named["literalpath"]) == 0 && input != nil && input.known {
+		srcs = input.paths
+	}
+	d := psResolve(dest[0].s, ps.cwd)
+	if d == "" {
+		return
+	}
+	var paths []string
+	if isDir(d) {
+		for _, src := range srcs {
+			if t := filepath.Join(d, filepath.Base(src)); exists(t) {
+				paths = append(paths, t)
+			}
+		}
+		if len(srcs) == 0 {
+			paths = append(paths, d) // sources unknown: keep the whole destination
+		}
+	} else if exists(d) {
+		paths = append(paths, d)
+	}
+	if len(paths) > 0 {
+		ps.actions = append(ps.actions, Action{Program: program, Paths: paths, Note: "overwrites existing files"})
+	}
+}
+
+func (ps *psState) redirect(r psTok) {
+	if r.appendRedir || r.val == "" {
+		return
+	}
+	if !r.ok {
+		return
+	}
+	p := psResolve(r.val, ps.cwd)
+	if p == "" {
+		return
+	}
+	if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() && fi.Size() > 0 {
+		ps.actions = append(ps.actions, Action{Program: ">", Paths: []string{p}, Note: "redirect overwrites file"})
+	}
+}
+
+var dotNetFile = regexp.MustCompile(`(?i)\[(?:system\.)?io\.(file|directory)\]::(delete|writealltext|writeallbytes|writealllines|copy|move|replace)\(\s*(?:'([^']*)'|"([^"$` + "`" + `]*)")\s*(?:,\s*(?:'([^']*)'|"([^"$` + "`" + `]*)"))?`)
+
+// scanDotNet finds [IO.File]::Delete('x') style calls with literal paths.
+func (ps *psState) scanDotNet(toks []psTok) {
+	for _, t := range toks {
+		if t.kind != tWord && t.kind != tParen {
+			continue
+		}
+		text := t.raw
+		if t.kind == tParen {
+			text = t.val
+		}
+		for _, m := range dotNetFile.FindAllStringSubmatch(text, -1) {
+			op := strings.ToLower(m[2])
+			target := m[3] + m[4]
+			if op == "copy" || op == "move" || op == "replace" {
+				target = m[5] + m[6] // the destination is what gets overwritten
+			}
+			if p := psResolve(target, ps.cwd); p != "" && exists(p) {
+				ps.actions = append(ps.actions, Action{Program: "[IO." + m[1] + "]::" + m[2], Paths: []string{p}, Delete: op == "delete"})
+			}
+		}
 	}
 }
 
