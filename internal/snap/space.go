@@ -68,3 +68,14 @@ func errNoSpace(size int64, sp Space) error {
 	return fmt.Errorf("a %s copy would leave %s free, under the %s floor Oopsy keeps free on this disk (set free_floor_gb with oops config)",
 		human(size), human(max(sp.Free-size, 0)), human(sp.Floor))
 }
+
+// CheckSpace returns an error explaining the problem when writing n bytes
+// under dir would break the free space floor, and nil when it fits or the
+// free space cannot be read.
+func CheckSpace(dir string, n int64) error {
+	sp, err := SpaceAt(dir, LoadConfig())
+	if err != nil || sp.Allows(n) {
+		return nil
+	}
+	return errNoSpace(n, sp)
+}
