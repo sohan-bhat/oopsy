@@ -330,21 +330,24 @@ func TestWindowsReFSBlockClone(t *testing.T) {
 		{"Set-Content data.bin 'x'", f},
 		{"Remove-Item -Recurse -Force tree", filepath.Join(e.work, "tree")},
 	} {
-		free := freeBytes(t, e.work)
+		start := time.Now()
 		e.psHook(t, c.line)
-		used := free - freeBytes(t, e.work)
-		time.Sleep(3 * time.Second) // ReFS may settle shared cluster counts lazily
-		settled := free - freeBytes(t, e.work)
-		t.Logf("free space change right after: %s, after 3 s: %s", mb(used), mb(settled))
-		used = settled
+		took := time.Since(start)
 		s := e.latest(t)
 		if len(s.Entries) != 1 || s.Entries[0].Method != "block clone" {
 			t.Fatalf("%s: want a block clone, got %+v %+v", c.line, s.Entries, s.Skipped)
 		}
-		t.Logf("ReFS block clone for %q of %s: volume free space changed by %s", c.line, mb(s.Entries[0].Size), mb(used))
-		if used > 8<<20 {
-			t.Errorf("block clone used %s", mb(used))
+		// ReFS reports free space lazily, so check sharing directly: a
+		// block clone maps to the very same clusters as the original.
+		orig, saved := c.path, filepath.Join(e.oops, "snapshots", fmt.Sprint(s.ID), "files", "0")
+		if c.path != f {
+			orig, saved = filepath.Join(c.path, "d0", "f000.bin"), filepath.Join(saved, "d0", "f000.bin")
 		}
+		a, b := extents(t, orig), extents(t, saved)
+		if len(a) == 0 || fmt.Sprint(a) != fmt.Sprint(b) {
+			t.Fatalf("%s: clone does not share clusters with the original:\n%v\n%v", c.line, a, b)
+		}
+		t.Logf("ReFS block clone for %q of %s in %v: shares all %d extents with the original, no data copied", c.line, mb(s.Entries[0].Size), took.Round(time.Millisecond), len(a))
 	}
 	os.WriteFile(f, []byte("x"), 0o644)
 	os.Remove(f)
@@ -352,6 +355,37 @@ func TestWindowsReFSBlockClone(t *testing.T) {
 	if got, _ := os.ReadFile(f); !bytes.Equal(got, big) {
 		t.Fatal("block cloned file restored with different bytes")
 	}
+}
+
+// extents lists a file's physical cluster runs (FSCTL_GET_RETRIEVAL_POINTERS).
+func extents(t *testing.T, p string) [][2]int64 {
+	t.Helper()
+	u, _ := windows.UTF16PtrFromString(p)
+	h, err := windows.CreateFile(u, windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(h)
+	const fsctlGetRetrievalPointers = 0x00090073
+	var start int64
+	out := make([]byte, 1<<16)
+	var ret uint32
+	if err := windows.DeviceIoControl(h, fsctlGetRetrievalPointers, (*byte)(unsafePointer(&start)), 8, &out[0], uint32(len(out)), &ret, nil); err != nil {
+		t.Fatalf("retrieval pointers for %s: %v", p, err)
+	}
+	n := int(uint32(out[0]) | uint32(out[1])<<8 | uint32(out[2])<<16 | uint32(out[3])<<24)
+	le := func(off int) int64 {
+		var v int64
+		for i := 7; i >= 0; i-- {
+			v = v<<8 | int64(out[off+i])
+		}
+		return v
+	}
+	var runs [][2]int64
+	for i := 0; i < n; i++ {
+		runs = append(runs, [2]int64{le(16 + 16*i), le(24 + 16*i)}) // NextVcn, Lcn
+	}
+	return runs
 }
 
 // TestWindowsAgentPayloads sends Claude Code payloads with Git Bash and
