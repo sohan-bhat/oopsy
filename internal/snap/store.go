@@ -23,6 +23,8 @@ type Config struct {
 	// a disk (see FreeFloor). Zero means automatic.
 	FreeFloorBytes int64 `json:"free_floor_bytes,omitempty"`
 	Quiet          bool  `json:"quiet"`
+	// MirrorMaxFiles caps the projects the generic layer mirrors.
+	MirrorMaxFiles int `json:"mirror_max_files,omitempty"`
 }
 
 // DefaultConfig is used when no config file exists.
@@ -99,6 +101,9 @@ type Entry struct {
 	// After is what the command left at Orig. While the file still matches
 	// it, undo replaces it with the saved version instead of keeping both.
 	After *Stamp `json:"after,omitempty"`
+	// Generic is set on entries the project mirror saved, as opposed to
+	// paths the command line named.
+	Generic bool `json:"generic,omitempty"`
 	// Mode and Mtime describe object entries, whose stored file is shared.
 	Mode  uint32 `json:"mode,omitempty"`
 	Mtime int64  `json:"mtime,omitempty"`
