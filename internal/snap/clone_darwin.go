@@ -39,3 +39,17 @@ func cloneFile(src, dst string, fi os.FileInfo) error {
 	}
 	return plainCopy(src, dst, fi)
 }
+
+// cloneOnly clones one file and fails instead of copying.
+func cloneOnly(src, dst string, _ os.FileInfo) error {
+	return unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW)
+}
+
+// cloneDir clones a whole folder in one call, which APFS does in the kernel.
+func cloneDir(src, dst string) bool {
+	if unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW) != nil {
+		_ = forceRemove(dst)
+		return false
+	}
+	return true
+}
