@@ -31,6 +31,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: echo "OOPS_TEST_PG_BIN=$env:PGBIN" >> $env:GITHUB_ENV
+      - name: Create a ReFS volume for block clone tests (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $vhd = Join-Path $env:RUNNER_TEMP 'refs.vhdx'
+          @(
+            "create vdisk file=`"$vhd`" maximum=4096 type=expandable",
+            "select vdisk file=`"$vhd`"",
+            "attach vdisk",
+            "create partition primary",
+            "format fs=refs quick label=OopsyReFS",
+            "assign letter=R"
+          ) | Set-Content -Encoding ascii "$env:RUNNER_TEMP\refs.txt"
+          diskpart /s "$env:RUNNER_TEMP\refs.txt"
+          Get-Volume -DriveLetter R | Format-List DriveLetter, FileSystem, Size
+          New-Item -ItemType Directory R:\oops-test | Out-Null
+          fsutil fsinfo volumeinfo R: | Select-String 'Block Cloning|File System Name'
+          echo "OOPS_TEST_REFS=R:\oops-test" >> $env:GITHUB_ENV
       - run: go vet ./...
       - run: go test ./internal/... ./cmd/...
-      - run: go test -v -timeout 20m ./e2e/
+      - if: success() || failure()
+        run: go test -v -timeout 20m ./e2e/
