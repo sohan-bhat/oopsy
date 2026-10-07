@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 // method picks snapshot methods for tests and benchmarks: OOPS_METHOD=copy
@@ -21,6 +22,9 @@ var method = func() string {
 
 // forceCopy disables copy on write clones.
 var forceCopy = method == "copy" || method == "hardlink"
+
+// syncCopies flushes copied files (Windows, for NTFS compression).
+var syncCopies = runtime.GOOS == "windows"
 
 // errNoClone means the filesystem cannot make copy on write clones here.
 var errNoClone = errors.New("copy on write clones are not supported here")
@@ -169,6 +173,11 @@ func plainCopy(src, dst string, fi os.FileInfo) error {
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
 		return err
+	}
+	if syncCopies {
+		// NTFS compresses a file when its data reaches the disk; until then
+		// it reserves the full size. Flushing makes the saving real now.
+		_ = out.Sync()
 	}
 	return out.Close()
 }

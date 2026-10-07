@@ -17,7 +17,7 @@ import (
 type linker struct {
 	root    string            // tree root, so files have stable relative names
 	record  bool              // true when taking a snapshot, false on restore
-	attrs   map[string]uint32 // Windows attributes a delete may clear (see fragileAttrs)
+	attrs   map[string]uint32 // attributes or modes a delete may clear (see fragileAttrs)
 	copied  int64             // bytes that had to be copied instead of linked
 	nCopied int
 }
@@ -31,7 +31,8 @@ func (l *linker) file(src, dst string, fi os.FileInfo) error {
 	}
 	// On restore, a file that was read only is copied rather than linked, so
 	// clearing the attribute on one link later cannot change the other.
-	mustCopy := !l.record && l.attrs[rel]&readOnlyAttr != 0
+	a, recorded := l.attrs[rel]
+	mustCopy := !l.record && recorded && recordedReadOnly(a)
 	if !mustCopy {
 		if err := os.Link(src, dst); err == nil {
 			return nil

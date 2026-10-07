@@ -151,3 +151,29 @@ func TestMinimalPaths(t *testing.T) {
 		t.Fatalf("minimalPaths = %v, want %v", got, want)
 	}
 }
+
+// TestHardLinkKeepsReadOnly mimics Remove-Item -Force, which makes a read
+// only file writable before deleting it. Through a hard link that change
+// reaches the snapshot, so the original mode must come back on restore.
+func TestHardLinkKeepsReadOnly(t *testing.T) {
+	withMethod(t, "hardlink")
+	work := testEnv(t)
+	f := filepath.Join(work, "sub", "b.txt")
+	os.Chmod(f, 0o444)
+	s := create(t, work, classify.Action{Program: "Remove-Item", Paths: []string{filepath.Join(work, "sub")}, Delete: true})
+	if s.Entries[0].Method != "hardlink" {
+		t.Fatalf("method %s", s.Entries[0].Method)
+	}
+	os.Chmod(f, 0o644)
+	os.RemoveAll(filepath.Join(work, "sub"))
+	if _, err := Restore(s); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(f)
+	if err != nil || fi.Mode().Perm()&0o200 != 0 {
+		t.Fatalf("read only not restored: %v %v", fi.Mode(), err)
+	}
+	if saved, _ := os.Stat(storeFile(s, s.Entries[0], "b.txt")); os.SameFile(fi, saved) {
+		t.Error("a read only file was linked back; clearing it later would change the snapshot")
+	}
+}
