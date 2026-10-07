@@ -8,7 +8,7 @@ builds:
     main: ./cmd/oops
     binary: oops
     env: [CGO_ENABLED=0]
-    goos: [darwin, linux]
+    goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{ .Version }}"]
@@ -16,7 +16,7 @@ builds:
     main: ./cmd/oops-db
     binary: oops-db
     env: [CGO_ENABLED=0]
-    goos: [darwin, linux]
+    goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags: ["-s -w -X main.version={{ .Version }}"]
@@ -25,6 +25,9 @@ archives:
   - id: oopsy
     ids: [oops, oops-db]
     formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     name_template: "oopsy_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files: [LICENSE, README.md]
 
