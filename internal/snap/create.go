@@ -71,7 +71,6 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 		}
 	}
 
-	budget := cfg.CopyCapBytes
 	for i, p := range minimalPaths(paths) {
 		fi, err := os.Lstat(p)
 		if err != nil {
@@ -102,7 +101,7 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 				break
 			}
 		}
-		skipped, err := s.saveEntry(&e, deleteOnly, &budget)
+		skipped, err := s.saveEntry(&e, deleteOnly, cfg)
 		s.Skipped = append(s.Skipped, skipped...)
 		if err != nil {
 			continue
@@ -130,8 +129,8 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 
 // saveEntry saves e.Orig with the cheapest safe method: a copy on write
 // clone, then hard links when the command only deletes, then a plain copy
-// (NTFS compressed on Windows) within the copy budget.
-func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, error) {
+// (NTFS compressed on Windows) when the disk keeps its free space floor.
+func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, error) {
 	p := e.Orig
 	if method != "copy" && !sameDevice(p, s.Dir()) {
 		e.Base = s.volumeDir(p)
@@ -169,13 +168,8 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, 
 		dst = s.EntryPath(*e)
 	}
 	size, n, _ := treeSize(p)
-	if size > *budget {
-		why := "this filesystem has no copy on write clones"
-		if deleteOnly {
-			why += " or hard links here"
-		}
-		err := fmt.Errorf("%s and %s is over the copy limit of %s (raise copy_cap_bytes in %s)",
-			why, human(size), human(*budget), ConfigPath())
+	if sp, err := SpaceAt(filepath.Dir(dst), cfg); err == nil && !sp.Allows(size) {
+		err := errNoSpace(size, sp)
 		return []Skip{{Path: p, Reason: err.Error()}}, err
 	}
 	if !s.compressTried {
@@ -188,7 +182,6 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, 
 		_ = forceRemove(dst)
 		return []Skip{{Path: p, Reason: "copy failed: " + skipReason(err)}}, err
 	}
-	*budget -= size
 	e.Method, e.Size, e.Files = "copy", size, n
 	if isCompressed(dst) {
 		e.Method = "compressed copy"

@@ -220,7 +220,11 @@ func statusCmd() *cobra.Command {
 }
 
 func storageKind() string {
-	limit := ui.Bytes(snap.LoadConfig().CopyCapBytes)
+	cfg := snap.LoadConfig()
+	limit := "while the disk keeps its free space floor"
+	if sp, err := snap.SpaceAt(snap.Dir(), cfg); err == nil {
+		limit = fmt.Sprintf("while the disk keeps %s free (%s free now)", ui.Bytes(sp.Floor), ui.Bytes(sp.Free))
+	}
 	switch probeClone() {
 	case "clone":
 		return "APFS clones (instant, copy on write)"
@@ -230,9 +234,9 @@ func storageKind() string {
 		return "ReFS block clones (instant, copy on write)"
 	}
 	if runtime.GOOS == "windows" {
-		return fmt.Sprintf("hard links for deletes (instant, no extra disk), NTFS compressed copies for overwrites, capped at %s per snapshot", limit)
+		return fmt.Sprintf("hard links for deletes (instant, no extra disk), NTFS compressed copies for overwrites %s", limit)
 	}
-	return fmt.Sprintf("hard links for deletes (instant, no extra disk), plain copies for overwrites, capped at %s per snapshot", limit)
+	return fmt.Sprintf("hard links for deletes (instant, no extra disk), plain copies for overwrites %s", limit)
 }
 
 func isPowerShell(name string) bool { return name == "powershell" || name == "windowspowershell" }

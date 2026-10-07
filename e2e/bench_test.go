@@ -108,8 +108,6 @@ func TestSnapshotSpeed1GB(t *testing.T) {
 		env := e.environ()
 		if mode == "copy" {
 			env = append(env, "OOPS_FORCE_COPY=1")
-			os.MkdirAll(e.oops, 0o700)
-			os.WriteFile(filepath.Join(e.oops, "config.json"), []byte(`{"copy_cap_bytes": 4294967296}`), 0o600)
 		}
 		c := exec.Command(bin, "hook", "zsh", "--", "rm -rf big")
 		c.Dir = e.work

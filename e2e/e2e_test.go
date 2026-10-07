@@ -72,7 +72,7 @@ func (e *env) environ() []string {
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		switch strings.ToUpper(k) {
-		case "HOME", "OOPS_HOME", "NO_COLOR", "USERPROFILE", "OOPS_DOCUMENTS_DIR":
+		case "HOME", "OOPS_HOME", "NO_COLOR", "USERPROFILE", "OOPS_DOCUMENTS_DIR", "OOPS_FREE_FLOOR_BYTES":
 			continue
 		}
 		out = append(out, kv)
@@ -80,7 +80,7 @@ func (e *env) environ() []string {
 	if onWindows {
 		out = append(out, "USERPROFILE="+e.home, "OOPS_DOCUMENTS_DIR="+filepath.Join(e.home, "Documents"))
 	}
-	return append(out, "HOME="+e.home, "OOPS_HOME="+e.oops, "NO_COLOR=1",
+	return append(out, "HOME="+e.home, "OOPS_HOME="+e.oops, "NO_COLOR=1", "OOPS_FREE_FLOOR_BYTES=1",
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_CONFIG_NOSYSTEM=1")
 }
 
