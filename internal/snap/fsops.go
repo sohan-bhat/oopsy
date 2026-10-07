@@ -26,6 +26,10 @@ var forceCopy = method == "copy" || method == "hardlink"
 // syncCopies flushes copied files (Windows, for NTFS compression).
 var syncCopies = runtime.GOOS == "windows"
 
+// ntfsCompression: Windows copies use NTFS compression; elsewhere Oopsy
+// compresses copies itself with zstd.
+var ntfsCompression = runtime.GOOS == "windows"
+
 // errNoClone means the filesystem cannot make copy on write clones here.
 var errNoClone = errors.New("copy on write clones are not supported here")
 

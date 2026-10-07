@@ -177,12 +177,16 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, err
 		s.compressTried = true
 		compressDir(filepath.Dir(dst))
 	}
-	skipped, err = copyTree(p, dst, cloneFile)
+	fileCopy, m := cloneFile, "copy"
+	if !ntfsCompression {
+		fileCopy, m = zcopyFile, "zstd copy"
+	}
+	skipped, err = copyTree(p, dst, fileCopy)
 	if err != nil {
 		_ = forceRemove(dst)
 		return []Skip{{Path: p, Reason: "copy failed: " + skipReason(err)}}, err
 	}
-	e.Method, e.Size, e.Files = "copy", size, n
+	e.Method, e.Size, e.Files = m, size, n
 	if isCompressed(dst) {
 		e.Method = "compressed copy"
 	}

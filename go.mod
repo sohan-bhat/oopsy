@@ -5,6 +5,7 @@ go 1.27.2
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/klauspost/compress v1.18.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/pganalyze/pg_query_go/v6 v6.2.5
 	github.com/spf13/cobra v1.10.2
