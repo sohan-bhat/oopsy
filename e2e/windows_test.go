@@ -181,10 +181,19 @@ func TestWindowsLockedFileIsSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer windows.CloseHandle(h)
+	// A hard link needs no read access, so the default snapshot keeps even
+	// the locked file.
+	e.psHook(t, "Remove-Item -Recurse -Force proj")
+	if s := e.latest(t); len(s.Entries) != 1 || s.Entries[0].Method != "hardlink" || len(s.Skipped) != 0 {
+		t.Fatalf("hard link snapshot of a tree with a locked file: %+v", s)
+	}
+	// An overwrite has to copy, and a file nobody may read is skipped
+	// with a warning while the rest is saved.
+	os.MkdirAll(filepath.Join(e.work, "other", "proj"), 0o755)
 	start := time.Now()
 	c := exec.Command(bin, "hook", "powershell")
 	c.Dir = e.work
-	c.Env = append(e.environ(), "OOPSY_LINE=Copy-Item ..\\x proj -Force; Remove-Item -Recurse -Force proj", "OOPSY_CWD="+e.work)
+	c.Env = append(e.environ(), "OOPSY_LINE=Copy-Item -Recurse -Force other\\proj .", "OOPSY_CWD="+e.work)
 	out, _ := c.CombinedOutput()
 	if took := time.Since(start); took > 5*time.Second {
 		t.Errorf("hook blocked for %v on a locked file", took)
@@ -193,8 +202,8 @@ func TestWindowsLockedFileIsSkipped(t *testing.T) {
 		t.Fatalf("expected a warning about the locked file:\n%s", out)
 	}
 	s := e.latest(t)
-	if len(s.Entries) != 1 {
-		t.Fatalf("the rest of the tree was not saved: %+v", s)
+	if len(s.Entries) != 1 || len(s.Skipped) != 1 || !strings.EqualFold(s.Skipped[0].Path, locked) {
+		t.Fatalf("want the tree saved without the locked file: %+v", s)
 	}
 }
 
@@ -324,6 +333,10 @@ func TestWindowsReFSBlockClone(t *testing.T) {
 		free := freeBytes(t, e.work)
 		e.psHook(t, c.line)
 		used := free - freeBytes(t, e.work)
+		time.Sleep(3 * time.Second) // ReFS may settle shared cluster counts lazily
+		settled := free - freeBytes(t, e.work)
+		t.Logf("free space change right after: %s, after 3 s: %s", mb(used), mb(settled))
+		used = settled
 		s := e.latest(t)
 		if len(s.Entries) != 1 || s.Entries[0].Method != "block clone" {
 			t.Fatalf("%s: want a block clone, got %+v %+v", c.line, s.Entries, s.Skipped)
