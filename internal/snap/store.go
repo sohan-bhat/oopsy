@@ -96,10 +96,35 @@ type Entry struct {
 	Attrs map[string]uint32 `json:"attrs,omitempty"`
 	// Base is set when the data lives in a store on another volume.
 	Base string `json:"base,omitempty"`
+	// After is what the command left at Orig. While the file still matches
+	// it, undo replaces it with the saved version instead of keeping both.
+	After *Stamp `json:"after,omitempty"`
+	// Mode and Mtime describe object entries, whose stored file is shared.
+	Mode  uint32 `json:"mode,omitempty"`
+	Mtime int64  `json:"mtime,omitempty"`
+}
+
+// Stamp identifies one version of a file cheaply.
+type Stamp struct {
+	Size  int64 `json:"size"`
+	Mtime int64 `json:"mtime"`
+}
+
+// StampOf returns the stamp of the file at p, or nil when it is missing or
+// not a regular file.
+func StampOf(p string) *Stamp {
+	fi, err := os.Lstat(p)
+	if err != nil || !fi.Mode().IsRegular() {
+		return nil
+	}
+	return &Stamp{Size: fi.Size(), Mtime: fi.ModTime().UnixNano()}
 }
 
 // EntryPath is where entry e's saved data lives.
 func (s *Snapshot) EntryPath(e Entry) string {
+	if e.Method == "object" {
+		return ObjectPath(e.Store)
+	}
 	if e.Base != "" {
 		return filepath.Join(e.Base, e.Store)
 	}
@@ -133,6 +158,7 @@ type Snapshot struct {
 	Programs []string    `json:"programs"`
 	Entries  []Entry     `json:"entries,omitempty"`
 	Git      []GitRecord `json:"git,omitempty"`
+	Records  []Record    `json:"records,omitempty"`
 	Skipped  []Skip      `json:"skipped,omitempty"`
 	Notes    []string    `json:"notes,omitempty"`
 	Size     int64       `json:"size"`
@@ -321,6 +347,8 @@ func Prune(cfg Config, all bool) (PruneResult, error) {
 			total -= s.Size
 		}
 	}
+	_, freed := pruneObjects(objectsUsed(keep))
+	res.Bytes += freed
 	return res, nil
 }
 

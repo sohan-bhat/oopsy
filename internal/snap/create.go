@@ -15,9 +15,11 @@ import (
 	"github.com/sohan-bhat/oopsy/internal/classify"
 )
 
-// Create snapshots everything the actions are about to destroy. It returns
-// nil and no error when there turned out to be nothing worth saving.
-func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, error) {
+// Create snapshots everything the actions are about to destroy, and runs
+// the captures for state that is not files (Kubernetes objects, Terraform
+// state and so on). It returns nil and no error when there turned out to be
+// nothing worth saving.
+func Create(command, cwd, source string, actions []classify.Action, captures ...Capture) (*Snapshot, error) {
 	start := time.Now()
 	cfg := LoadConfig()
 	l, err := acquire()
@@ -112,8 +114,9 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 		s.Files += e.Files
 	}
 
+	s.runCaptures(captures)
 	s.dropEmptyVolumeDirs()
-	if len(s.Entries) == 0 && len(s.Git) == 0 && len(s.Skipped) == 0 && len(s.Notes) == 0 {
+	if len(s.Entries) == 0 && len(s.Git) == 0 && len(s.Records) == 0 && len(s.Skipped) == 0 && len(s.Notes) == 0 {
 		_ = forceRemove(s.Dir())
 		return nil, nil
 	}

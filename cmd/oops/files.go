@@ -154,6 +154,8 @@ func printOutcomes(outcomes []snap.Outcome) {
 			same++
 		case "git":
 			fmt.Printf("  %s %s\n", ui.Good("git"), o.Detail)
+		case "record":
+			fmt.Printf("  %s %s: %s\n", ui.Good("restored"), o.Path, o.Detail)
 		case "failed":
 			fmt.Printf("  %s %s: %s\n", ui.Bad("failed"), ui.HomeRel(o.Path), o.Detail)
 		}
