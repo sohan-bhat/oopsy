@@ -262,6 +262,7 @@ func kindLabel(k string) string {
 	return map[string]string{
 		"delete": "DELETE", "update": "UPDATE", "update_full": "UPDATE", "truncate": "TRUNCATE",
 		"drop_table": "DROP TABLE", "drop_schema": "DROP SCHEMA", "drop_column": "DROP COLUMN",
+		"drop_view": "DROP VIEW", "drop_matview": "DROP MAT VIEW", "drop_function": "DROP FUNCTION",
 	}[k]
 }
 

@@ -367,3 +367,169 @@ BEGIN
   RETURN n;
 END
 $f$;
+
+-- The proxy and the protect triggers both save before destructive changes.
+-- Each marks what it saved in a transaction local setting, so a change the
+-- proxy already saved is not saved a second time by the protect triggers.
+-- kinds: d delete, u update, t truncate, x drop.
+CREATE OR REPLACE FUNCTION oops._mark(o oid, kinds text) RETURNS void
+LANGUAGE sql AS $f$
+  SELECT set_config('oops.px_' || o, coalesce(current_setting('oops.px_' || o, true), '') || kinds, true)
+$f$;
+
+CREATE OR REPLACE FUNCTION oops._consume(o oid, kind text) RETURNS boolean
+LANGUAGE plpgsql AS $f$
+DECLARE
+  v text := coalesce(current_setting('oops.px_' || o, true), '');
+BEGIN
+  IF position(kind in v) = 0 THEN RETURN false; END IF;
+  PERFORM set_config('oops.px_' || o, regexp_replace(v, kind, ''), true);
+  RETURN true;
+END
+$f$;
+
+-- GRANT statements that rebuild an access list exactly, in its original
+-- order. A NULL list means the default privileges, which a recreated object
+-- gets anyway.
+CREATE OR REPLACE FUNCTION oops._acl_sql(acl aclitem[], objtype text, obj text, owner oid) RETURNS text[]
+LANGUAGE sql STABLE AS $f$
+  SELECT CASE WHEN acl IS NULL THEN '{}'::text[] ELSE
+    ARRAY[format('REVOKE ALL ON %s %s FROM PUBLIC', objtype, obj),
+          format('REVOKE ALL ON %s %s FROM %s', objtype, obj, owner::regrole)]
+    || coalesce((SELECT array_agg(format('GRANT %s ON %s %s TO %s%s', a.privilege_type, objtype, obj,
+                   CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END,
+                   CASE WHEN a.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END) ORDER BY a.ord)
+                   FROM aclexplode(acl) WITH ORDINALITY a(grantor, grantee, privilege_type, is_grantable, ord)), '{}') END
+$f$;
+
+-- Definition of a view or materialized view, everything that goes with it,
+-- and the views built on it, which DROP ... CASCADE removes too.
+CREATE OR REPLACE FUNCTION oops._snap_view(v oid, p_grp text, p_stmt text, depth int) RETURNS bigint
+LANGUAGE plpgsql AS $f$
+DECLARE
+  c record;
+  rec record;
+  name text;
+  kw text;
+  ddl text;
+  post text[] := '{}';
+  n bigint := 1;
+BEGIN
+  IF depth > 20 THEN RETURN 0; END IF;
+  SELECT cl.relkind, cl.relname, ns.nspname, cl.reloptions, cl.relispopulated, cl.relacl, cl.relowner
+    INTO c FROM pg_class cl JOIN pg_namespace ns ON ns.oid = cl.relnamespace WHERE cl.oid = v;
+  IF NOT FOUND OR c.relkind NOT IN ('v', 'm') THEN RETURN 0; END IF;
+  IF EXISTS (SELECT 1 FROM oops.journal WHERE grp = p_grp AND meta->>'oid' = v::text) THEN RETURN 0; END IF;
+  name := format('%I.%I', c.nspname, c.relname);
+  kw := CASE c.relkind WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE 'VIEW' END;
+  ddl := format('CREATE %s %s', kw, name);
+  IF c.reloptions IS NOT NULL THEN
+    ddl := ddl || format(' WITH (%s)', array_to_string(c.reloptions, ', '));
+  END IF;
+  ddl := ddl || ' AS ' || rtrim(pg_get_viewdef(v), ';');
+  IF c.relkind = 'm' THEN ddl := ddl || ' WITH NO DATA'; END IF;
+  post := post || format('ALTER %s %s OWNER TO %s', kw, name, c.relowner::regrole);
+  FOR rec IN SELECT a.attname, pg_get_expr(d.adbin, d.adrelid) AS dflt FROM pg_attrdef d
+               JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum WHERE d.adrelid = v LOOP
+    post := post || format('ALTER VIEW %s ALTER COLUMN %I SET DEFAULT %s', name, rec.attname, rec.dflt);
+  END LOOP;
+  FOR rec IN SELECT pg_get_indexdef(indexrelid) AS def FROM pg_index WHERE indrelid = v ORDER BY indexrelid LOOP
+    post := post || rec.def;
+  END LOOP;
+  FOR rec IN SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgrelid = v AND NOT tgisinternal ORDER BY tgname LOOP
+    post := post || rec.def;
+  END LOOP;
+  IF c.relkind = 'm' AND c.relispopulated THEN
+    post := post || format('REFRESH MATERIALIZED VIEW %s', name);
+  END IF;
+  post := post || oops._acl_sql(c.relacl, 'TABLE', name, c.relowner);
+  IF obj_description(v, 'pg_class') IS NOT NULL THEN
+    post := post || format('COMMENT ON %s %s IS %L', kw, name, obj_description(v, 'pg_class'));
+  END IF;
+  FOR rec IN SELECT a.attname, col_description(v, a.attnum) AS d FROM pg_attribute a
+              WHERE a.attrelid = v AND a.attnum > 0 AND NOT a.attisdropped AND col_description(v, a.attnum) IS NOT NULL ORDER BY a.attnum LOOP
+    post := post || format('COMMENT ON COLUMN %s.%I IS %L', name, rec.attname, rec.d);
+  END LOOP;
+  INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, ddl, ddl_post, meta, row_count, statement)
+  VALUES (p_grp, CASE c.relkind WHEN 'm' THEN 'drop_matview' ELSE 'drop_view' END, c.nspname, c.relname, ddl, post,
+          jsonb_build_object('oid', v, 'populated', c.relispopulated), 0, p_stmt);
+  PERFORM oops._mark(v, 'x');
+  FOR rec IN SELECT DISTINCT rw.ev_class AS dep FROM pg_depend d JOIN pg_rewrite rw ON rw.oid = d.objid
+              WHERE d.classid = 'pg_rewrite'::regclass AND d.refclassid = 'pg_class'::regclass
+                AND d.refobjid = v AND rw.ev_class <> v LOOP
+    n := n + oops._snap_view(rec.dep, p_grp, p_stmt, depth + 1);
+  END LOOP;
+  RETURN n;
+END
+$f$;
+
+CREATE OR REPLACE FUNCTION oops.snap_drop_view(p_rel text, p_grp text, p_stmt text) RETURNS bigint
+LANGUAGE plpgsql AS $f$
+DECLARE
+  r regclass := to_regclass(p_rel);
+BEGIN
+  IF r IS NULL THEN RETURN 0; END IF;
+  RETURN oops._snap_view(r, p_grp, p_stmt, 0);
+END
+$f$;
+
+-- Definition of a function or procedure, plus the triggers, column
+-- defaults and views that DROP FUNCTION ... CASCADE takes with it.
+CREATE OR REPLACE FUNCTION oops._snap_routine(f oid, p_grp text, p_stmt text) RETURNS bigint
+LANGUAGE plpgsql AS $f$
+DECLARE
+  c record;
+  rec record;
+  sig text;
+  kw text;
+  post text[] := '{}';
+  n bigint := 1;
+BEGIN
+  SELECT p.proname, ns.nspname, p.prokind, p.proacl, p.proowner, oidvectortypes(p.proargtypes) AS args
+    INTO c FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace WHERE p.oid = f;
+  IF NOT FOUND OR c.prokind NOT IN ('f', 'p') THEN RETURN 0; END IF;
+  IF EXISTS (SELECT 1 FROM oops.journal WHERE grp = p_grp AND meta->>'oid' = f::text) THEN RETURN 0; END IF;
+  sig := format('%I.%I(%s)', c.nspname, c.proname, c.args);
+  kw := CASE c.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END;
+  post := post || format('ALTER %s %s OWNER TO %s', kw, sig, c.proowner::regrole);
+  post := post || oops._acl_sql(c.proacl, kw, sig, c.proowner);
+  IF obj_description(f, 'pg_proc') IS NOT NULL THEN
+    post := post || format('COMMENT ON %s %s IS %L', kw, sig, obj_description(f, 'pg_proc'));
+  END IF;
+  FOR rec IN SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgfoid = f AND NOT tgisinternal ORDER BY tgrelid, tgname LOOP
+    post := post || rec.def;
+  END LOOP;
+  FOR rec IN SELECT ad.adrelid, a.attname, pg_get_expr(ad.adbin, ad.adrelid) AS dflt
+               FROM pg_depend d JOIN pg_attrdef ad ON ad.oid = d.objid
+               JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+              WHERE d.classid = 'pg_attrdef'::regclass AND d.refclassid = 'pg_proc'::regclass AND d.refobjid = f LOOP
+    post := post || format('ALTER TABLE %s ALTER COLUMN %I SET DEFAULT %s', oops.qualified(rec.adrelid), rec.attname, rec.dflt);
+  END LOOP;
+  INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, ddl, ddl_post, meta, row_count, statement)
+  VALUES (p_grp, 'drop_function', c.nspname, c.proname || '(' || c.args || ')', pg_get_functiondef(f), post,
+          jsonb_build_object('oid', f, 'sig', sig, 'routine', lower(kw)), 0, p_stmt);
+  PERFORM oops._mark(f, 'x');
+  FOR rec IN SELECT DISTINCT rw.ev_class AS dep FROM pg_depend d JOIN pg_rewrite rw ON rw.oid = d.objid
+              WHERE d.classid = 'pg_rewrite'::regclass AND d.refclassid = 'pg_proc'::regclass AND d.refobjid = f LOOP
+    n := n + oops._snap_view(rec.dep, p_grp, p_stmt, 1);
+  END LOOP;
+  RETURN n;
+END
+$f$;
+
+-- p_sig is name(argtypes), or a bare name when the statement gave no
+-- argument list.
+CREATE OR REPLACE FUNCTION oops.snap_drop_routine(p_sig text, p_grp text, p_stmt text) RETURNS bigint
+LANGUAGE plpgsql AS $f$
+DECLARE
+  f oid;
+BEGIN
+  BEGIN
+    IF position('(' in p_sig) > 0 THEN f := to_regprocedure(p_sig); ELSE f := to_regproc(p_sig); END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RETURN 0;
+  END;
+  IF f IS NULL THEN RETURN 0; END IF;
+  RETURN oops._snap_routine(f, p_grp, p_stmt);
+END
+$f$;
