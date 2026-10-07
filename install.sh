@@ -1,5 +1,5 @@
 #!/bin/sh
-# Oopsy installer: curl -fsSL https://raw.githubusercontent.com/sohan-bhat/oopsy/main/install.sh | sh
+# Oopsy installer: curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | sh
 # Installs oops and oops-db into /usr/local/bin when writable, else ~/.local/bin.
 # Set OOPSY_VERSION=v0.2.0 to pick a version, OOPSY_BIN_DIR to pick a directory.
 set -eu
