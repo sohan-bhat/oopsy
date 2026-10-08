@@ -66,6 +66,8 @@ func Targets(cmd, cwd string, env []string) []Target {
 		switch progName(c.argv[0]) {
 		case "kubectl", "oc":
 			ts = kubeTargets(c)
+		case "terraform", "tofu":
+			ts = tfTargets(c)
 		default:
 			continue
 		}
