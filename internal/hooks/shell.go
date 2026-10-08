@@ -11,36 +11,52 @@ import (
 // Each hook does a regex prefilter in the shell itself, so harmless commands
 // never start a process.
 func ShellInit(shell, bin string) (string, error) {
-	re := classify.QuickPattern
+	re := classify.ReadOnlyPattern
 	q := shQuote(bin)
 	switch shell {
 	case "zsh":
-		return fmt.Sprintf(`# Oopsy: snapshot destructive commands before they run. Undo with: oops
+		return fmt.Sprintf(`# Oopsy: snapshot before commands that can change files. Undo with: oops
 if [[ -z "${__OOPSY_LOADED:-}" ]]; then
   typeset -g __OOPSY_LOADED=1
-  typeset -g __OOPSY_RE=%s
+  typeset -g __OOPSY_RO=%s
+  typeset -g __oopsy_pending=
   __oopsy_preexec() {
     local cmd="${3:-$1}"
-    [[ "$cmd" =~ $__OOPSY_RE ]] || return 0
-    %s hook zsh -- "$cmd"
+    [[ "$cmd" =~ $__OOPSY_RO ]] && return 0
+    __oopsy_pending=1
+    OOPSY_SESSION=$$ %s hook zsh -- "$cmd"
+  }
+  __oopsy_precmd() {
+    [[ -n "$__oopsy_pending" ]] || return 0
+    __oopsy_pending=
+    ( OOPSY_SESSION=$$ OOPSY_POST_QUIET=1 %s hook zsh-post </dev/null >/dev/null 2>&1 & ) 2>/dev/null
   }
   autoload -Uz add-zsh-hook
   add-zsh-hook preexec __oopsy_preexec
+  add-zsh-hook precmd __oopsy_precmd
   export OOPSY_SHELL_HOOK=zsh
 fi
-`, shQuote(re), q), nil
+`, shQuote(re), q, q), nil
 	case "bash":
-		return fmt.Sprintf(`# Oopsy: snapshot destructive commands before they run. Undo with: oops
+		return fmt.Sprintf(`# Oopsy: snapshot before commands that can change files. Undo with: oops
 if [ -z "${__OOPSY_LOADED:-}" ]; then
   __OOPSY_LOADED=1
-  __OOPSY_RE=%s
+  __OOPSY_RO=%s
+  __oopsy_pending=
   __oopsy_run() {
-    [[ "$1" =~ $__OOPSY_RE ]] || return 0
-    %s hook bash -- "$1"
+    [[ "$1" =~ $__OOPSY_RO ]] && return 0
+    __oopsy_pending=1
+    OOPSY_SESSION=$$ %s hook bash -- "$1"
+  }
+  __oopsy_post() {
+    [ -n "$__oopsy_pending" ] || return 0
+    __oopsy_pending=
+    ( OOPSY_SESSION=$$ OOPSY_POST_QUIET=1 %s hook bash-post </dev/null >/dev/null 2>&1 & )
   }
   if [ -n "${bash_preexec_imported:-}${__bp_imported:-}" ]; then
     __oopsy_preexec() { __oopsy_run "$1"; }
     preexec_functions+=(__oopsy_preexec)
+    precmd_functions+=(__oopsy_post)
   else
     __oopsy_debug() {
       [ -n "${COMP_LINE:-}" ] && return 0
@@ -54,26 +70,35 @@ if [ -z "${__OOPSY_LOADED:-}" ]; then
     __oopsy_prev_trap="$(trap -p DEBUG)"
     if [ -n "$__oopsy_prev_trap" ]; then
       __oopsy_prev_trap="${__oopsy_prev_trap#trap -- \'}"
-      __oopsy_prev_trap="${__oopsy_prev_trap%%\' DEBUG}"
+      __oopsy_prev_trap="${__oopsy_prev_trap%%%%\' DEBUG}"
       trap "__oopsy_debug; $__oopsy_prev_trap" DEBUG
     else
       trap '__oopsy_debug' DEBUG
     fi
+    PROMPT_COMMAND="__oopsy_post${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
   fi
   export OOPSY_SHELL_HOOK=bash
 fi
-`, shQuote(re), q), nil
+`, shQuote(re), q, q), nil
 	case "fish":
-		return fmt.Sprintf(`# Oopsy: snapshot destructive commands before they run. Undo with: oops
+		return fmt.Sprintf(`# Oopsy: snapshot before commands that can change files. Undo with: oops
 if not set -q __OOPSY_LOADED
     set -g __OOPSY_LOADED 1
+    set -g __oopsy_pending
     function __oopsy_preexec --on-event fish_preexec
-        string match -qr -- %s $argv[1]; or return 0
-        %s hook fish -- $argv[1]
+        string match -qr -- %s $argv[1]; and return 0
+        set -g __oopsy_pending 1
+        OOPSY_SESSION=$fish_pid %s hook fish -- $argv[1]
+    end
+    function __oopsy_postexec --on-event fish_postexec
+        test -n "$__oopsy_pending"; or return 0
+        set -g __oopsy_pending
+        OOPSY_SESSION=$fish_pid OOPSY_POST_QUIET=1 %s hook fish-post </dev/null >/dev/null 2>&1 &
+        disown 2>/dev/null
     end
     set -gx OOPSY_SHELL_HOOK fish
 end
-`, shQuote(re), q), nil
+`, shQuote(re), q, q), nil
 	case "powershell", "pwsh":
 		return powerShellInit(bin), nil
 	}
