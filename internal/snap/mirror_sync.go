@@ -76,6 +76,7 @@ func (m *Mirror) sync(attr *Pending, limit int) (*SyncResult, error) {
 		m.put(n)
 	}
 	m.addAll(added)
+	m.clearPrewrite()
 	if err := writeIndex(m.indexPath(), cur); err != nil {
 		return nil, err
 	}

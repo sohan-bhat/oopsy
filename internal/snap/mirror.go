@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -89,11 +90,17 @@ func OpenMirror(root string) (*Mirror, error) {
 	meta, err := m.meta()
 	if err == nil && meta.Method != "" {
 		m.Method = meta.Method
+		if m.Method == "hardlink" && runtime.GOOS == "linux" {
+			listPrewriteRoot(root)
+		}
 		return m, nil
 	}
 	m.Method = probeMirrorMethod(m.Dir)
 	if m.Method == "" {
 		return nil, ErrNoMirror
+	}
+	if m.Method == "hardlink" && runtime.GOOS == "linux" {
+		listPrewriteRoot(root)
 	}
 	return m, m.saveMeta(mirrorMeta{Root: root, Method: m.Method, Created: time.Now()})
 }

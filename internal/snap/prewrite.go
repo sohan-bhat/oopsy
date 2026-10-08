@@ -2,6 +2,7 @@ package snap
 
 import (
 	"fmt"
+	"strings"
 	"hash/fnv"
 	"os"
 	"path/filepath"
@@ -10,8 +11,8 @@ import (
 // On disks where the mirror uses hard links, a program that writes into a
 // file in place changes the mirror's link too. Some hooks (the Linux
 // preload library, oops watch) copy a file right before its first write and
-// leave the copy in the prewrite folder, named by a hash of the path, with
-// the original's size and time. A sync uses it when the stamps match.
+// leave the copy in prewrite/<hash of the root>/<hash of the path>, with the
+// original's size and time. A sync uses it when the stamps match.
 
 // PrewriteDir is where pre write copies land.
 func PrewriteDir() string { return filepath.Join(Dir(), "prewrite") }
@@ -24,10 +25,38 @@ func PrewriteName(p string) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
+// listPrewriteRoot adds a hard link mirror's root to the list the preload
+// library reads, so it only copies files Oopsy mirrors.
+func listPrewriteRoot(root string) {
+	p := filepath.Join(PrewriteDir(), "roots")
+	b, _ := os.ReadFile(p)
+	for _, line := range strings.Split(string(b), "\n") {
+		if line == root {
+			return
+		}
+	}
+	if err := os.MkdirAll(PrewriteDir(), 0o700); err != nil {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.WriteString(root + "\n")
+}
+
+// prewriteDir is where pre write copies of this mirror's files land.
+func (m *Mirror) prewriteDir() string { return filepath.Join(PrewriteDir(), PrewriteName(m.Root)) }
+
+// clearPrewrite drops pre write copies once a sync has used what it needs:
+// whatever is left belongs to changes that are already accounted for.
+func (m *Mirror) clearPrewrite() { _ = os.RemoveAll(m.prewriteDir()) }
+
 // preWriteBackup returns a pre write copy of rel that holds the version
 // the index knew, or "".
 func (m *Mirror) preWriteBackup(rel string, old node) string {
-	p := filepath.Join(PrewriteDir(), PrewriteName(m.origPath(rel)))
+	p := filepath.Join(m.prewriteDir(), PrewriteName(m.origPath(rel)))
 	st := StampOf(p)
 	if st == nil || *st != old.stamp() {
 		return ""
