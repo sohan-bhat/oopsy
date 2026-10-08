@@ -68,6 +68,8 @@ func Targets(cmd, cwd string, env []string) []Target {
 			ts = kubeTargets(c)
 		case "terraform", "tofu":
 			ts = tfTargets(c)
+		case "docker", "podman":
+			ts = dockerTargets(c)
 		default:
 			continue
 		}
