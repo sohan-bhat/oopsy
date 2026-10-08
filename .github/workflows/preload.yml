@@ -16,6 +16,7 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - name: Build in manylinux2014
         run: |
+          mkdir -p internal/preload/lib
           for arch in x86_64:amd64 aarch64:arm64; do
             m=${arch%%:*}; g=${arch##*:}
             docker run --rm --platform linux/$g -v "$PWD:/src" -w /src quay.io/pypa/manylinux2014_$m \
