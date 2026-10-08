@@ -145,3 +145,12 @@ func uninstallCmd() (string, error) {
 	}
 	return bk, nil
 }
+
+// CmdCoverage says which cmd.exe lines the hook sees on this machine.
+func CmdCoverage() string {
+	if findClink() != "" {
+		return "cmd.exe: Clink is installed, so every line typed in a cmd window where Clink is loaded is checked before it runs."
+	}
+	return "cmd.exe: lines that start with " + strings.Join(cmdBuiltins, ", ") + ", " + strings.Join(cmdTools, ", ") +
+		" are checked before they run. Install Clink to cover every typed line."
+}
