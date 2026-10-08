@@ -29,6 +29,9 @@ type Config struct {
 	NoPreload bool `json:"no_preload,omitempty"`
 	// MirrorMaxFiles caps the projects the generic layer mirrors.
 	MirrorMaxFiles int `json:"mirror_max_files,omitempty"`
+	// WatchMaxFileMB is the largest file whose previous version watch mode
+	// keeps when it changes. Zero means DefaultWatchMaxFileMB.
+	WatchMaxFileMB int `json:"watch_max_file_mb,omitempty"`
 }
 
 // DefaultConfig is used when no config file exists.
@@ -247,6 +250,21 @@ func Latest() (*Snapshot, error) {
 	}
 	for _, s := range all {
 		if s.Restored == nil {
+			return s, nil
+		}
+	}
+	return nil, nil
+}
+
+// LatestUndo returns what plain oops undoes: the newest unrestored snapshot
+// that is not a watch snapshot made only of edits.
+func LatestUndo() (*Snapshot, error) {
+	all, err := List()
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range all {
+		if s.Restored == nil && !s.WatchEditsOnly() {
 			return s, nil
 		}
 	}
