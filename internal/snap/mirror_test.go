@@ -115,7 +115,8 @@ func TestMirrorCatchesUnknownCommands(t *testing.T) {
 				t.Fatalf("MirrorAfter: %v %+v", err, res)
 			}
 			s := res.Snapshot
-			if m == "hardlink" {
+			mm, _ := OpenMirror(work)
+			if mm.Method == "hardlink" {
 				// The in place rewrite cannot be kept with hard links.
 				if len(s.Skipped) != 1 || filepath.Base(s.Skipped[0].Path) != "main.go" {
 					for _, e := range s.Entries {
