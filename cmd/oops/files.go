@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sohan-bhat/oopsy/internal/classify"
+	"github.com/sohan-bhat/oopsy/internal/remote"
 	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
 )
@@ -290,6 +291,9 @@ func showCmd() *cobra.Command {
 			}
 			for _, g := range s.Git {
 				fmt.Printf("%s %s\n", ui.Bold("git"), describeGit(g))
+			}
+			for _, r := range s.Records {
+				fmt.Printf("%s  %s\n", ui.Bold(r.Label), ui.Dim(r.Kind+", "+ui.Bytes(r.Size)+" saved"))
 			}
 			for _, sk := range s.Skipped {
 				fmt.Printf("%s %s: %s\n", ui.Warn("not saved"), ui.HomeRel(sk.Path), sk.Reason)
@@ -577,11 +581,15 @@ func explainCmd() *cobra.Command {
 				cwd, _ = os.Getwd()
 			}
 			res := classify.Classify(line, cwd, os.Environ())
-			if !res.Destructive() {
+			targets := remote.Targets(line, cwd, os.Environ())
+			if !res.Destructive() && len(targets) == 0 {
 				fmt.Println(ui.Good("Not destructive.") + " Oopsy would let it run without a snapshot.")
 				return nil
 			}
 			fmt.Println(ui.Warn("Destructive.") + " Oopsy would save this first:")
+			for _, t := range targets {
+				fmt.Printf("  %s %s\n", ui.Accent(t.Tool), t.Describe)
+			}
 			for _, a := range res.Actions {
 				label := a.Program
 				if a.Broad {
