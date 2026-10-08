@@ -5,12 +5,42 @@ import (
 	"strings"
 
 	"github.com/sohan-bhat/oopsy/internal/classify"
+	"github.com/sohan-bhat/oopsy/internal/preload"
 )
 
 // ShellInit returns the hook code that `eval "$(oops shell-init zsh)"` loads.
 // Each hook does a regex prefilter in the shell itself, so harmless commands
 // never start a process.
 func ShellInit(shell, bin string) (string, error) {
+	s, err := shellInit(shell, bin)
+	if err != nil {
+		return "", err
+	}
+	return s + preloadLines(shell), nil
+}
+
+// preloadLines exports the Linux preload library (see internal/preload) for
+// programs started from this shell.
+func preloadLines(shell string) string {
+	lib := preload.Install()
+	if lib == "" {
+		return ""
+	}
+	q := shQuote(lib)
+	switch shell {
+	case "zsh", "bash":
+		return fmt.Sprintf(`case ":${LD_PRELOAD:-}:" in *:%s:*) ;; *) export LD_PRELOAD=%s"${LD_PRELOAD:+:$LD_PRELOAD}" ;; esac
+`, lib, q)
+	case "fish":
+		return fmt.Sprintf(`if not string match -q -- '*%s*' "$LD_PRELOAD"
+    if test -n "$LD_PRELOAD"; set -gx LD_PRELOAD %s":$LD_PRELOAD"; else; set -gx LD_PRELOAD %s; end
+end
+`, lib, q, q)
+	}
+	return ""
+}
+
+func shellInit(shell, bin string) (string, error) {
 	re := classify.ReadOnlyPattern
 	q := shQuote(bin)
 	switch shell {
