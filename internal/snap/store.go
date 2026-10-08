@@ -373,7 +373,11 @@ func Prune(cfg Config, all bool) (PruneResult, error) {
 			total -= s.Size
 		}
 	}
-	_, freed := pruneObjects(objectsUsed(keep))
+	used := objectsUsed(keep)
+	for h := range WatchBaseObjects() {
+		used[h] = true
+	}
+	_, freed := pruneObjects(used)
 	res.Bytes += freed
 	return res, nil
 }
