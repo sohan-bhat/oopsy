@@ -23,6 +23,8 @@ type Config struct {
 	// a disk (see FreeFloor). Zero means automatic.
 	FreeFloorBytes int64 `json:"free_floor_bytes,omitempty"`
 	Quiet          bool  `json:"quiet"`
+	// RebuildableKeepDays is how long node_modules and friends are kept.
+	RebuildableKeepDays int `json:"rebuildable_keep_days,omitempty"`
 	// MirrorMaxFiles caps the projects the generic layer mirrors.
 	MirrorMaxFiles int `json:"mirror_max_files,omitempty"`
 }
@@ -101,6 +103,8 @@ type Entry struct {
 	// After is what the command left at Orig. While the file still matches
 	// it, undo replaces it with the saved version instead of keeping both.
 	After *Stamp `json:"after,omitempty"`
+	// Rebuildable entries (node_modules and friends) are pruned after a day.
+	Rebuildable bool `json:"rebuildable,omitempty"`
 	// Generic is set on entries the project mirror saved, as opposed to
 	// paths the command line named.
 	Generic bool `json:"generic,omitempty"`
@@ -343,6 +347,21 @@ func Prune(cfg Config, all bool) (PruneResult, error) {
 		keep = append(keep, s)
 		total += s.Size
 	}
+	rebuildCut := time.Now().Add(-time.Duration(cfg.rebuildableDays()) * 24 * time.Hour)
+	var kept []*Snapshot
+	for _, s := range keep {
+		if s.Time.Before(rebuildCut) {
+			freed, empty := s.dropRebuildable()
+			res.Bytes += freed
+			total -= freed
+			if empty && Remove(s.ID) == nil {
+				res.Removed++
+				continue
+			}
+		}
+		kept = append(kept, s)
+	}
+	keep = kept
 	for len(keep) > 1 && total > cfg.MaxBytes {
 		s := keep[0]
 		keep = keep[1:]
@@ -355,6 +374,39 @@ func Prune(cfg Config, all bool) (PruneResult, error) {
 	_, freed := pruneObjects(objectsUsed(keep))
 	res.Bytes += freed
 	return res, nil
+}
+
+func (c Config) rebuildableDays() int {
+	if c.RebuildableKeepDays > 0 {
+		return c.RebuildableKeepDays
+	}
+	return 1
+}
+
+// dropRebuildable deletes the rebuildable entries of an old snapshot and
+// reports the bytes freed and whether nothing is left in it.
+func (s *Snapshot) dropRebuildable() (int64, bool) {
+	var freed int64
+	var keep []Entry
+	for _, e := range s.Entries {
+		if !e.Rebuildable {
+			keep = append(keep, e)
+			continue
+		}
+		_ = forceRemove(s.EntryPath(e))
+		freed += e.Size
+	}
+	if len(keep) == len(s.Entries) {
+		return 0, false
+	}
+	s.Entries = keep
+	s.Size -= freed
+	if len(keep) == 0 && len(s.Git) == 0 && len(s.Records) == 0 {
+		return freed, true
+	}
+	s.Notes = append(s.Notes, "rebuildable folders in this snapshot were pruned after a day")
+	_ = s.save()
+	return freed, false
 }
 
 // Usage returns the number of snapshots and their total size.

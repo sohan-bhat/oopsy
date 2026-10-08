@@ -44,6 +44,9 @@ type Action struct {
 	// Delete means the command only unlinks Paths and never writes into
 	// them, so a hard link is a safe snapshot. Overwrites leave it false.
 	Delete bool `json:"delete,omitempty"`
+	// Rebuildable marks folders like node_modules that are saved whole,
+	// only when a command is about to touch them, and kept one day.
+	Rebuildable bool `json:"rebuildable,omitempty"`
 }
 
 // Result is the outcome of classifying a command line.
