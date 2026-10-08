@@ -302,7 +302,7 @@ func untarVolume(t tool, archive, volume string) error {
 	}
 	defer zr.Close()
 	_, err = t.run(volumeTimeout, zr, nil, "run", "--rm", "-i", "--network", "none", "--pull", "missing",
-		"--volume", volume+":/v", "--entrypoint", "tar", helperImage, "-C", "/v", "-xpf", "-")
+		"--volume", volume+":/v", "--entrypoint", "tar", helperImage, "-C", "/v", "-xf", "-")
 	return err
 }
 
