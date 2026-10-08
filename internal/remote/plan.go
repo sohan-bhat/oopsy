@@ -64,6 +64,8 @@ func Targets(cmd, cwd string, env []string) []Target {
 		}
 		var ts []Target
 		switch progName(c.argv[0]) {
+		case "kubectl", "oc":
+			ts = kubeTargets(c)
 		default:
 			continue
 		}
