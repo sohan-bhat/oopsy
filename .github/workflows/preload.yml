@@ -1,0 +1,31 @@
+name: preload
+# Builds the Linux preload library for both architectures against an old
+# glibc, so it loads everywhere. Download the artifact into
+# internal/preload/lib when oopsy_preload.c changes.
+on:
+  push:
+    branches: [main]
+    paths: ["internal/preload/oopsy_preload.c", ".github/workflows/preload.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - name: Build in manylinux2014
+        run: |
+          for arch in x86_64:amd64 aarch64:arm64; do
+            m=${arch%%:*}; g=${arch##*:}
+            docker run --rm --platform linux/$g -v "$PWD:/src" -w /src quay.io/pypa/manylinux2014_$m \
+              gcc -O2 -fPIC -shared -Wall -Werror -o internal/preload/lib/liboopsy_preload_$g.so internal/preload/oopsy_preload.c -ldl -lpthread
+            sudo chown "$(id -u)" internal/preload/lib/liboopsy_preload_$g.so
+            strip internal/preload/lib/liboopsy_preload_$g.so 2>/dev/null || true
+          done
+          file internal/preload/lib/*.so
+          objdump -T internal/preload/lib/liboopsy_preload_amd64.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preload
+          path: internal/preload/lib/*.so
