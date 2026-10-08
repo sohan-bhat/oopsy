@@ -27,6 +27,12 @@ func TestPlanKinds(t *testing.T) {
 		{"DROP MATERIALIZED VIEW mv", "DROP MATERIALIZED VIEW", []string{`snap_drop_view(E'"mv"'`}, false},
 		{"DROP FUNCTION s.f(int, character varying(10), OUT x text)", "DROP FUNCTION", []string{`snap_drop_routine(E'"s"."f"(int, varchar(10))'`}, false},
 		{"DROP FUNCTION g CASCADE", "DROP FUNCTION", []string{`snap_drop_routine(E'"g"'`}, false},
+		{"INSERT INTO t (id, v) VALUES (1, 'a'), ($1, $2) ON CONFLICT (id) DO UPDATE SET v = excluded.v", "UPSERT",
+			[]string{`AS SELECT * FROM (VALUES (1, 'a'), ($1, $2)) oops_src(id, v)`, `record_upsert(E'"t"', ARRAY[E'id', E'v']::text[]`, `ARRAY[E'id']::text[], E''`}, true},
+		{"INSERT INTO t SELECT * FROM s ON CONFLICT ON CONSTRAINT t_pkey DO UPDATE SET v = 1", "UPSERT", []string{`'{}'::text[]`, `E't_pkey'`}, false},
+		{"INSERT INTO t (id) VALUES (DEFAULT) ON CONFLICT (id) DO UPDATE SET v = 1", "UPSERT", []string{`snap_table(E'"t"'`}, false},
+		{"INSERT INTO t (id) VALUES (nextval('s')) ON CONFLICT (id) DO UPDATE SET v = 1", "UPSERT", []string{`snap_table(E'"t"'`}, false},
+		{"INSERT INTO t (id) VALUES (1) ON CONFLICT (id) WHERE active DO UPDATE SET v = 1", "UPSERT", []string{`snap_table(E'"t"'`}, false},
 		{"DROP PROCEDURE p(IN a int)", "DROP PROCEDURE", []string{`snap_drop_routine(E'"p"(int)'`}, false},
 	}
 	for _, c := range cases {
@@ -63,6 +69,7 @@ func TestPlanIgnoresHarmless(t *testing.T) {
 	for _, q := range []string{
 		"SELECT * FROM users",
 		"INSERT INTO t VALUES (1)",
+		"INSERT INTO t VALUES (1) ON CONFLICT DO NOTHING",
 		"SELECT 'delete from x'",
 		"CREATE TABLE updates (id int)",
 		"ALTER TABLE t ADD COLUMN c int",

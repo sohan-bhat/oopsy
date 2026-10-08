@@ -533,3 +533,76 @@ BEGIN
   RETURN oops._snap_routine(f, p_grp, p_stmt);
 END
 $f$;
+
+-- INSERT ... ON CONFLICT DO UPDATE. The proxy copied the incoming rows into
+-- oops.<p_raw> as the statement computes them. This names and types them
+-- after the target columns into oops.<p_in>, then copies the existing rows
+-- they collide with on the conflict columns into oops.<p_snap>. Undo puts
+-- those old values back and removes the incoming rows that had no old row.
+CREATE OR REPLACE FUNCTION oops.record_upsert(p_rel text, p_cols text[], p_raw text, p_in text, p_snap text,
+                                              p_keys text[], p_constraint text, p_grp text, p_stmt text)
+RETURNS bigint LANGUAGE plpgsql AS $f$
+DECLARE
+  r regclass := to_regclass(p_rel);
+  raw regclass := to_regclass(format('oops.%I', p_raw));
+  cols text[] := p_cols;
+  keys text[] := p_keys;
+  sel text := '';
+  keymatch text;
+  n_raw int;
+  n_in bigint;
+  n_old bigint;
+  ns text; nm text;
+  rec record;
+  i int := 0;
+  typ text;
+BEGIN
+  IF r IS NULL OR raw IS NULL THEN
+    EXECUTE format('DROP TABLE IF EXISTS oops.%I', p_raw);
+    RETURN 0;
+  END IF;
+  SELECT nspname, relname INTO ns, nm FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace WHERE c.oid = r;
+  IF p_constraint <> '' THEN
+    SELECT array_agg(a.attname::text ORDER BY k.ord) INTO keys
+      FROM pg_constraint c
+      CROSS JOIN unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord)
+      JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+     WHERE c.conrelid = r AND c.conname = p_constraint AND c.contype IN ('p', 'u');
+  END IF;
+  SELECT count(*) INTO n_raw FROM pg_attribute WHERE attrelid = raw AND attnum > 0 AND NOT attisdropped;
+  IF cardinality(cols) = 0 THEN
+    SELECT array_agg(attname::text ORDER BY attnum) INTO cols FROM pg_attribute
+     WHERE attrelid = r AND attnum > 0 AND NOT attisdropped;
+  END IF;
+  cols := cols[1:least(n_raw, cardinality(cols))];
+  FOR rec IN SELECT attname FROM pg_attribute WHERE attrelid = raw AND attnum > 0 AND NOT attisdropped ORDER BY attnum LOOP
+    i := i + 1;
+    EXIT WHEN i > cardinality(cols);
+    SELECT format_type(atttypid, atttypmod) INTO typ FROM pg_attribute
+     WHERE attrelid = r AND attname = cols[i] AND attnum > 0 AND NOT attisdropped;
+    sel := sel || CASE WHEN i > 1 THEN ', ' ELSE '' END || format('%I::%s AS %I', rec.attname, typ, cols[i]);
+  END LOOP;
+  IF keys IS NULL OR cardinality(keys) = 0 OR sel IS NULL OR sel = '' OR NOT (keys <@ cols) THEN
+    -- The conflict columns are not all given (a default fills one), so the
+    -- colliding rows cannot be found: keep the whole table instead.
+    EXECUTE format('DROP TABLE oops.%I', p_raw);
+    PERFORM oops._mark(r, 'u');
+    RETURN oops._snap_whole(r, p_grp, 'update_full', p_stmt, false);
+  END IF;
+  EXECUTE format('CREATE TABLE oops.%I AS SELECT %s FROM oops.%I', p_in, sel, p_raw);
+  EXECUTE format('DROP TABLE oops.%I', p_raw);
+  EXECUTE format('SELECT count(*) FROM oops.%I', p_in) INTO n_in;
+  IF n_in = 0 THEN
+    EXECUTE format('DROP TABLE oops.%I', p_in);
+    RETURN 0;
+  END IF;
+  SELECT string_agg(format('t.%I = i.%I', k, k), ' AND ') INTO keymatch FROM unnest(keys) AS k;
+  EXECUTE format('CREATE TABLE oops.%I AS SELECT t.* FROM %s t WHERE EXISTS (SELECT 1 FROM oops.%I i WHERE %s)', p_snap, r, p_in, keymatch);
+  EXECUTE format('SELECT count(*) FROM oops.%I', p_snap) INTO n_old;
+  INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, snap, key_cols, row_count, statement, meta)
+  VALUES (p_grp, 'upsert', ns, nm, p_snap, keys, n_old, p_stmt,
+          jsonb_build_object('incoming', p_in, 'cols', to_jsonb(cols), 'fresh', n_in - n_old));
+  PERFORM oops._mark(r, 'u');
+  RETURN n_old;
+END
+$f$;

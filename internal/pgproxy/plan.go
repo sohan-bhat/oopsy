@@ -113,6 +113,17 @@ func planStmt(n *pg.Node, text string) *StmtPlan {
 			break
 		}
 		rows(p, u.Relation, u.FromClause, u.WhereClause, u.WithClause, "update", nextSnap(), grp, text)
+	case n.GetInsertStmt() != nil:
+		ins := n.GetInsertStmt()
+		if oc := ins.OnConflictClause; oc == nil || oc.Action != pg.OnConflictAction_ONCONFLICT_UPDATE {
+			break
+		}
+		p.Kind = "UPSERT"
+		if !upsert(p, ins, nextSnap, grp, text) {
+			p.Snaps = nil
+			p.Targets = nil
+			whole(ins.Relation, "update_full")
+		}
 	case n.GetMergeStmt() != nil:
 		p.Kind = "MERGE"
 		whole(n.GetMergeStmt().Relation, "update_full")
@@ -255,6 +266,97 @@ func rows(p *StmtPlan, rv *pg.RangeVar, from []*pg.Node, where *pg.Node, with *p
 	)
 }
 
+// upsert plans INSERT ... ON CONFLICT DO UPDATE: copy the incoming rows,
+// then let oops.record_upsert save the existing rows they collide with.
+// It returns false when the statement is too unusual to narrow down, so
+// the caller copies the whole table instead.
+func upsert(p *StmtPlan, ins *pg.InsertStmt, nextSnap func() string, grp, text string) bool {
+	rel := rangeVarText(ins.Relation)
+	inf := ins.OnConflictClause.Infer
+	if rel == "" || inf == nil || inf.WhereClause != nil {
+		return false // a partial unique index can let equal keys exist twice
+	}
+	var keys []string
+	for _, ie := range inf.IndexElems {
+		el := ie.GetIndexElem()
+		if el == nil || el.Expr != nil || el.Name == "" {
+			return false
+		}
+		keys = append(keys, el.Name)
+	}
+	if len(keys) == 0 && inf.Conname == "" {
+		return false
+	}
+	var cols []string
+	alias := &pg.Alias{Aliasname: "oops_src"}
+	for _, c := range ins.Cols {
+		rt := c.GetResTarget()
+		if rt == nil || len(rt.Indirection) > 0 || rt.Name == "" {
+			return false
+		}
+		cols = append(cols, rt.Name)
+		alias.Colnames = append(alias.Colnames, pg.MakeStrNode(rt.Name))
+	}
+	src := ins.SelectStmt
+	// The incoming rows are computed twice, once for the copy and once by the
+	// statement, so anything that changes state when evaluated rules it out.
+	if src == nil || hasMessage(src, "SetToDefault") || nestedDML(ins.WithClause) ||
+		hasMessage(src, "DeleteStmt") || hasMessage(src, "UpdateStmt") || hasMessage(src, "InsertStmt") || hasMessage(src, "MergeStmt") ||
+		callsAny(src, "nextval", "setval") || (ins.WithClause != nil && callsAny(ins.WithClause, "nextval", "setval")) {
+		return false
+	}
+	star := pg.MakeResTargetNodeWithVal(pg.MakeColumnRefNode([]*pg.Node{pg.MakeAStarNode()}, -1), -1)
+	sel := &pg.SelectStmt{
+		TargetList:  []*pg.Node{star},
+		FromClause:  []*pg.Node{{Node: &pg.Node_RangeSubselect{RangeSubselect: &pg.RangeSubselect{Subquery: src, Alias: alias}}}},
+		WithClause:  ins.WithClause,
+		Op:          pg.SetOperation_SETOP_NONE,
+		LimitOption: pg.LimitOption_LIMIT_OPTION_DEFAULT,
+	}
+	tree := &pg.ParseResult{Version: 170000, Stmts: []*pg.RawStmt{{Stmt: &pg.Node{Node: &pg.Node_SelectStmt{SelectStmt: sel}}}}}
+	q, err := pgquery.Deparse(tree)
+	if err != nil {
+		return false
+	}
+	raw, in, old := nextSnap(), nextSnap(), nextSnap()
+	p.Targets = append(p.Targets, rel)
+	p.Snaps = append(p.Snaps,
+		SnapSQL{SQL: fmt.Sprintf("CREATE TABLE oops.%s AS %s", quoteIdent(raw), q), UsesParams: hasMessage(sel, "ParamRef")},
+		SnapSQL{SQL: fmt.Sprintf("SELECT oops.record_upsert(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+			lit(rel), textArray(cols), lit(raw), lit(in), lit(old), textArray(keys), lit(inf.Conname), lit(grp), dollar(text))},
+	)
+	return true
+}
+
+func textArray(items []string) string {
+	if len(items) == 0 {
+		return "'{}'::text[]"
+	}
+	var parts []string
+	for _, it := range items {
+		parts = append(parts, lit(it))
+	}
+	return "ARRAY[" + strings.Join(parts, ", ") + "]::text[]"
+}
+
+// callsAny reports whether m calls a function with one of the given names.
+func callsAny(m proto.Message, names ...string) bool {
+	found := false
+	walk(m.ProtoReflect(), func(x protoreflect.Message) {
+		fc, ok := x.Interface().(*pg.FuncCall)
+		if !ok || len(fc.Funcname) == 0 {
+			return
+		}
+		last := strings.ToLower(fc.Funcname[len(fc.Funcname)-1].GetString_().GetSval())
+		for _, n := range names {
+			if last == n {
+				found = true
+			}
+		}
+	})
+	return found
+}
+
 func isCurrentOf(n *pg.Node) bool { return n != nil && n.GetCurrentOfExpr() != nil }
 
 func nestedDML(w *pg.WithClause) bool {
@@ -275,6 +377,10 @@ func nestedDMLTargets(n *pg.Node) []*pg.RangeVar {
 			out = append(out, x.Relation)
 		case *pg.MergeStmt:
 			out = append(out, x.Relation)
+		case *pg.InsertStmt:
+			if oc := x.OnConflictClause; oc != nil && oc.Action == pg.OnConflictAction_ONCONFLICT_UPDATE {
+				out = append(out, x.Relation)
+			}
 		}
 	})
 	return out

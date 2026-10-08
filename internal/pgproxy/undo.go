@@ -176,6 +176,9 @@ func Describe(c Change) []string {
 			out = append(out, fmt.Sprintf("put back %d rows into %s.%s", e.Rows, e.Schema, e.Table))
 		case "update":
 			out = append(out, fmt.Sprintf("restore the old values of %d rows in %s.%s", e.Rows, e.Schema, e.Table))
+		case "upsert":
+			fresh, _ := e.Meta["fresh"].(float64)
+			out = append(out, fmt.Sprintf("restore the old values of %d rows in %s.%s that the upsert overwrote, and remove the %d rows it inserted", e.Rows, e.Schema, e.Table, int64(fresh)))
 		case "update_full":
 			out = append(out, fmt.Sprintf("replace all rows of %s.%s with the %d saved rows (no key to match rows on)", e.Schema, e.Table, e.Rows))
 		case "drop_table":
@@ -266,7 +269,7 @@ func Undo(ctx context.Context, conn *pgx.Conn, c Change) (*Result, error) {
 	var pending []Entry
 	for _, e := range c.Entries {
 		switch e.Kind {
-		case "delete", "truncate", "update", "update_full":
+		case "delete", "truncate", "update", "update_full", "upsert":
 			pending = append(pending, e)
 		}
 	}
@@ -546,46 +549,7 @@ func restoreRowsInner(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
 		}
 		return fmt.Sprintf("%s.%s reset to the %d saved rows", e.Schema, e.Table, n), nil
 	case "update":
-		cols, err := columns(ctx, tx, e.qualified())
-		if err != nil {
-			return "", err
-		}
-		key := map[string]bool{}
-		for _, k := range e.KeyCols {
-			key[k] = true
-		}
-		snapCols, err := columns(ctx, tx, "oops."+qi(e.Snap))
-		if err != nil {
-			return "", err
-		}
-		have := map[string]bool{}
-		for _, c := range snapCols {
-			have[c.name] = true
-		}
-		var set, src []string
-		for _, c := range cols {
-			if c.generate || c.identity == "a" || key[c.name] || !have[c.name] {
-				continue
-			}
-			set = append(set, qi(c.name))
-			src = append(src, "s."+qi(c.name))
-		}
-		var on []string
-		for _, k := range e.KeyCols {
-			on = append(on, fmt.Sprintf("t.%s = s.%s", qi(k), qi(k)))
-		}
-		var updated int64
-		if len(set) > 0 && len(on) > 0 {
-			sql := fmt.Sprintf("UPDATE %s t SET (%s) = ROW(%s) FROM oops.%s s WHERE %s",
-				e.qualified(), strings.Join(set, ", "), strings.Join(src, ", "), qi(e.Snap), strings.Join(on, " AND "))
-			tag, err := tx.Exec(ctx, sql)
-			if err != nil {
-				return "", fmt.Errorf("restoring old values in %s.%s: %w", e.Schema, e.Table, err)
-			}
-			updated = tag.RowsAffected()
-		}
-		// Rows deleted since the update come back as well.
-		inserted, err := insertRows(ctx, tx, e, true)
+		updated, inserted, err := restoreOldValues(ctx, tx, e)
 		if err != nil {
 			return "", err
 		}
@@ -594,8 +558,127 @@ func restoreRowsInner(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
 			line += fmt.Sprintf(", %d missing rows put back", inserted)
 		}
 		return line, nil
+	case "upsert":
+		updated, inserted, err := restoreOldValues(ctx, tx, e)
+		if err != nil {
+			return "", err
+		}
+		removed, kept, err := removeFresh(ctx, tx, e)
+		if err != nil {
+			return "", err
+		}
+		line := fmt.Sprintf("%d rows in %s.%s set back to their old values, %d rows the upsert inserted removed", updated, e.Schema, e.Table, removed)
+		if inserted > 0 {
+			line += fmt.Sprintf(", %d missing rows put back", inserted)
+		}
+		if kept > 0 {
+			line += fmt.Sprintf(", %d inserted rows changed since and were kept", kept)
+		}
+		return line, nil
 	}
 	return "", errors.New("unknown change kind " + e.Kind)
+}
+
+// restoreOldValues sets rows matched on the key columns back to the saved
+// values and puts back saved rows that no longer exist.
+func restoreOldValues(ctx context.Context, tx pgx.Tx, e Entry) (int64, int64, error) {
+	cols, err := columns(ctx, tx, e.qualified())
+	if err != nil {
+		return 0, 0, err
+	}
+	key := map[string]bool{}
+	for _, k := range e.KeyCols {
+		key[k] = true
+	}
+	snapCols, err := columns(ctx, tx, "oops."+qi(e.Snap))
+	if err != nil {
+		return 0, 0, err
+	}
+	have := map[string]bool{}
+	for _, c := range snapCols {
+		have[c.name] = true
+	}
+	var set, src []string
+	for _, c := range cols {
+		if c.generate || c.identity == "a" || key[c.name] || !have[c.name] {
+			continue
+		}
+		set = append(set, qi(c.name))
+		src = append(src, "s."+qi(c.name))
+	}
+	var on []string
+	for _, k := range e.KeyCols {
+		on = append(on, fmt.Sprintf("t.%s = s.%s", qi(k), qi(k)))
+	}
+	var updated int64
+	if len(set) > 0 && len(on) > 0 {
+		sql := fmt.Sprintf("UPDATE %s t SET (%s) = ROW(%s) FROM oops.%s s WHERE %s",
+			e.qualified(), strings.Join(set, ", "), strings.Join(src, ", "), qi(e.Snap), strings.Join(on, " AND "))
+		tag, err := tx.Exec(ctx, sql)
+		if err != nil {
+			return 0, 0, fmt.Errorf("restoring old values in %s.%s: %w", e.Schema, e.Table, err)
+		}
+		updated = tag.RowsAffected()
+	}
+	// Rows deleted since the update come back as well.
+	inserted, err := insertRows(ctx, tx, e, true)
+	if err != nil {
+		return 0, 0, err
+	}
+	return updated, inserted, nil
+}
+
+// removeFresh deletes the rows an upsert inserted, that is incoming rows
+// whose key had no old row, but only while every column the statement gave
+// still holds the value it wrote. Rows changed since are kept and counted.
+func removeFresh(ctx context.Context, tx pgx.Tx, e Entry) (int64, int64, error) {
+	in, _ := e.Meta["incoming"].(string)
+	if in == "" || len(e.KeyCols) == 0 {
+		return 0, 0, nil
+	}
+	var given []string
+	if l, ok := e.Meta["cols"].([]any); ok {
+		for _, c := range l {
+			if s, ok := c.(string); ok {
+				given = append(given, s)
+			}
+		}
+	}
+	cols, err := columns(ctx, tx, e.qualified())
+	if err != nil {
+		return 0, 0, err
+	}
+	present := map[string]bool{}
+	for _, c := range cols {
+		if !c.generate {
+			present[c.name] = true
+		}
+	}
+	var keyT, keyO, same []string
+	for _, k := range e.KeyCols {
+		keyT = append(keyT, fmt.Sprintf("t.%s = i.%s", qi(k), qi(k)))
+		keyO = append(keyO, fmt.Sprintf("o.%s = i.%s", qi(k), qi(k)))
+	}
+	for _, c := range given {
+		if present[c] {
+			same = append(same, fmt.Sprintf("t.%s::text IS NOT DISTINCT FROM i.%s::text", qi(c), qi(c)))
+		}
+	}
+	from := fmt.Sprintf("FROM oops.%s i WHERE %s AND NOT EXISTS (SELECT 1 FROM oops.%s o WHERE %s)",
+		qi(in), strings.Join(keyT, " AND "), qi(e.Snap), strings.Join(keyO, " AND "))
+	var candidates int64
+	if err := tx.QueryRow(ctx, fmt.Sprintf("SELECT count(*) FROM %s t, %s", e.qualified(), strings.TrimPrefix(from, "FROM "))).Scan(&candidates); err != nil {
+		return 0, 0, err
+	}
+	cond := ""
+	if len(same) > 0 {
+		cond = " AND " + strings.Join(same, " AND ")
+	}
+	tag, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s t USING %s%s", e.qualified(), strings.TrimPrefix(from, "FROM "), cond))
+	if err != nil {
+		return 0, 0, fmt.Errorf("removing rows the upsert inserted into %s.%s: %w", e.Schema, e.Table, err)
+	}
+	return tag.RowsAffected(), candidates - tag.RowsAffected(), nil
 }
 
 func restoreColumn(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
@@ -654,7 +737,7 @@ func Prune(ctx context.Context, conn *pgx.Conn, olderThan time.Duration, restore
 	if err != nil || !ok {
 		return 0, err
 	}
-	rows, err := conn.Query(ctx, `SELECT grp, array_agg(snap) FILTER (WHERE snap IS NOT NULL) FROM oops.journal
+	rows, err := conn.Query(ctx, `SELECT grp, array_agg(snap) FILTER (WHERE snap IS NOT NULL) || coalesce(array_agg(meta->>'incoming') FILTER (WHERE meta ? 'incoming'), '{}') FROM oops.journal
 		GROUP BY grp HAVING min(created_at) < now() - $1::interval OR ($2 AND bool_and(restored_at IS NOT NULL))`,
 		fmt.Sprintf("%d seconds", int(olderThan.Seconds())), restored)
 	if err != nil {
