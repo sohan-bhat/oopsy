@@ -19,7 +19,7 @@ jobs:
           for arch in x86_64:amd64 aarch64:arm64; do
             m=${arch%%:*}; g=${arch##*:}
             docker run --rm --platform linux/$g -v "$PWD:/src" -w /src quay.io/pypa/manylinux2014_$m \
-              gcc -O2 -fPIC -shared -Wall -Werror -o internal/preload/lib/liboopsy_preload_$g.so internal/preload/oopsy_preload.c -ldl -lpthread
+              gcc -O2 -fPIC -shared -Wall -Werror -Wno-format-truncation -o internal/preload/lib/liboopsy_preload_$g.so internal/preload/oopsy_preload.c -ldl -lpthread
             sudo chown "$(id -u)" internal/preload/lib/liboopsy_preload_$g.so
             strip internal/preload/lib/liboopsy_preload_$g.so 2>/dev/null || true
           done

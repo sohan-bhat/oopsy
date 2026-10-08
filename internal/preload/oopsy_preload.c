@@ -34,6 +34,9 @@
 
 #define MAX_ROOTS 64
 
+/* snprintf that reports whether everything fit. */
+#define FITS(buf, ...) (snprintf((buf), sizeof(buf), __VA_ARGS__) < (int)sizeof(buf))
+
 static char store[PATH_MAX];
 static char roots[MAX_ROOTS][PATH_MAX];
 static int nroots = -1;
@@ -49,19 +52,19 @@ static int raw_open(const char *p, int flags, mode_t mode) {
 static void load(void) {
     const char *home = getenv("OOPS_HOME");
     char base[PATH_MAX];
+    nroots = 0;
     if (home && *home) {
-        snprintf(base, sizeof base, "%s", home);
+        if (!FITS(base, "%s", home)) return;
     } else {
         const char *h = getenv("HOME");
-        if (!h || !*h) { nroots = 0; return; }
-        snprintf(base, sizeof base, "%s/.oops", h);
+        if (!h || !*h) return;
+        if (!FITS(base, "%s/.oops", h)) return;
     }
-    snprintf(store, sizeof store, "%s/prewrite", base);
+    if (!FITS(store, "%s/prewrite", base)) return;
     const char *mx = getenv("OOPSY_PREWRITE_MAX");
     if (mx && *mx) max_bytes = atoll(mx);
     char rp[PATH_MAX];
-    snprintf(rp, sizeof rp, "%s/roots", store);
-    nroots = 0;
+    if (!FITS(rp, "%s/roots", store)) return;
     int fd = raw_open(rp, O_RDONLY | O_CLOEXEC, 0);
     if (fd < 0) return;
     char buf[MAX_ROOTS * 256];
@@ -71,7 +74,7 @@ static void load(void) {
     buf[n] = 0;
     char *save = NULL;
     for (char *line = strtok_r(buf, "\n", &save); line && nroots < MAX_ROOTS; line = strtok_r(NULL, "\n", &save)) {
-        if (*line == '/') snprintf(roots[nroots++], PATH_MAX, "%s", line);
+        if (*line == '/' && strlen(line) < PATH_MAX) memcpy(roots[nroots++], line, strlen(line) + 1);
     }
 }
 
@@ -93,7 +96,7 @@ static uint64_t fnv(const char *s) {
 /* Absolute path of p as opened relative to dirfd, without resolving the
  * final component (it must be the file itself, not where a link points). */
 static int absolute(int dirfd, const char *p, char *out) {
-    if (p[0] == '/') { snprintf(out, PATH_MAX, "%s", p); return 0; }
+    if (p[0] == '/') return snprintf(out, PATH_MAX, "%s", p) < PATH_MAX ? 0 : -1;
     char dir[PATH_MAX];
     if (dirfd == AT_FDCWD) {
         if (!getcwd(dir, sizeof dir)) return -1;
@@ -122,12 +125,12 @@ static void save_copy(int dirfd, const char *p) {
     busy = 1;
     int saved_errno = errno;
     char dir[PATH_MAX], dst[PATH_MAX], tmp[PATH_MAX];
-    snprintf(dir, sizeof dir, "%s/%016llx", store, (unsigned long long)fnv(root));
+    if (!FITS(dir, "%s/%016llx", store, (unsigned long long)fnv(root))) goto out;
     mkdir(dir, 0700);
-    snprintf(dst, sizeof dst, "%s/%016llx", dir, (unsigned long long)fnv(abs));
+    if (!FITS(dst, "%s/%016llx", dir, (unsigned long long)fnv(abs))) goto out;
     struct stat old;
     if (lstat(dst, &old) == 0) goto out; /* the first write of this command was already saved */
-    snprintf(tmp, sizeof tmp, "%s.%d.tmp", dst, (int)getpid());
+    if (!FITS(tmp, "%s.%d.tmp", dst, (int)getpid())) goto out;
     int in = raw_open(abs, O_RDONLY | O_CLOEXEC, 0);
     if (in < 0) goto out;
     int o = raw_open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
