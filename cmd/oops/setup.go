@@ -54,8 +54,9 @@ func initCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "init",
 		Short: "Install the shell and AI agent hooks",
-		Long: `Installs preexec hooks for zsh, bash and fish, and PreToolUse style hooks for
-Claude Code, Codex CLI, Cursor and Gemini CLI. Only tools found on this machine
+		Long: `Installs preexec hooks for zsh, bash and fish, and hooks before and after each
+shell command and file edit for Claude Code, Codex CLI, Cursor and Gemini CLI.
+Only tools found on this machine
 are set up unless you pass --all or --only. Every file is backed up to
 ~/.oops/backups first, and oops uninstall reverses it.`,
 		Args: cobra.NoArgs,
