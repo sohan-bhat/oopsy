@@ -41,6 +41,7 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	}()
 	base, post := strings.CutSuffix(source, "-post")
 	var cmd, cwd, tool, session string
+	var payload []byte
 	if shellSources[base] {
 		cmd = strings.Join(args, " ")
 		if cmd == "" {
@@ -54,7 +55,8 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 		session = os.Getenv("OOPSY_SESSION")
 	} else {
-		b, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
+		// Write tool payloads carry the whole new file.
+		b, err := io.ReadAll(io.LimitReader(stdin, 256<<20))
 		if err != nil {
 			return 0
 		}
@@ -62,6 +64,7 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if err := json.Unmarshal(b, &in); err != nil {
 			return 0
 		}
+		payload = b
 		cmd = in.ToolInput.Command
 		if cmd == "" {
 			cmd = in.Command
@@ -70,6 +73,9 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		session = in.SessionID
 		if session == "" {
 			session = in.ConversationID
+		}
+		if session == "" {
+			session = os.Getenv("GEMINI_SESSION_ID")
 		}
 		cwd = in.Cwd
 		if cwd == "" && len(in.WorkspaceRoots) > 0 {
@@ -81,6 +87,9 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if cwd == "" {
 			cwd, _ = os.Getwd()
 		}
+	}
+	if payload != nil && runEdit(base, post, payload, cwd, session, stderr) {
+		return 0
 	}
 	if post {
 		afterCommand(base, session, stdout, stderr)
@@ -157,7 +166,7 @@ func agentReply(source, _ string, stdout io.Writer) {
 	switch source {
 	case "cursor":
 		fmt.Fprintln(stdout, `{"continue":true,"permission":"allow"}`)
-	case "gemini", "gemini-post":
+	case "gemini", "gemini-post", "cursor-post":
 		fmt.Fprintln(stdout, `{}`)
 	}
 	replied = true
