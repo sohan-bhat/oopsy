@@ -89,7 +89,8 @@ func Targets() []Target {
 	if win {
 		ts[1].Label = "Git Bash"
 		ts = append(ts, Target{Name: "windowspowershell", Label: "Windows PowerShell", Kind: "shell",
-			Path: filepath.Join(documentsDir(), "WindowsPowerShell", "profile.ps1")})
+			Path: filepath.Join(documentsDir(), "WindowsPowerShell", "profile.ps1")},
+			Target{Name: "cmd", Label: "cmd.exe", Kind: "shell", Path: `HKCU\` + cmdAutoRunKey + `\AutoRun`})
 	}
 	ts = append(ts,
 		Target{Name: "claude", Label: "Claude Code", Kind: "agent", Path: filepath.Join(h, ".claude", "settings.json")},
@@ -109,7 +110,7 @@ func Targets() []Target {
 		case "powershell":
 			_, err := exec.LookPath("pwsh")
 			t.Detected = exists(t.Path) || err == nil
-		case "windowspowershell":
+		case "windowspowershell", "cmd":
 			t.Detected = true // part of every Windows install
 		default:
 			t.Detected = exists(filepath.Dir(t.Path))
@@ -128,6 +129,9 @@ func gitBashInstalled() bool {
 }
 
 func installed(t Target) bool {
+	if t.Name == "cmd" {
+		return cmdInstalled()
+	}
 	b, err := os.ReadFile(t.Path)
 	if err != nil {
 		return false
@@ -180,6 +184,9 @@ func writeKeepMode(path string, data []byte) error {
 
 // Install adds the hook for t. It is safe to run twice.
 func Install(t Target, bin string) (string, error) {
+	if t.Name == "cmd" {
+		return installCmd(bin)
+	}
 	if installed(t) {
 		if t.Kind == "agent" {
 			// Refresh the command path in case the binary moved.
@@ -206,6 +213,9 @@ func Install(t Target, bin string) (string, error) {
 func Uninstall(t Target) (string, error) {
 	if !installed(t) {
 		return "", nil
+	}
+	if t.Name == "cmd" {
+		return uninstallCmd()
 	}
 	bk, err := backup(t.Path)
 	if err != nil {
