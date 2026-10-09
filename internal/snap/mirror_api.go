@@ -157,6 +157,11 @@ func MirrorAfter(root string) (*SyncResult, error) {
 // listing or undoing, so a command's snapshot is complete even when no hook
 // ran after it.
 func FinishPending(session string) []*SyncResult {
+	if session == "" {
+		defer FinishAfter("*")
+	} else {
+		defer FinishAfter(session)
+	}
 	ents, err := os.ReadDir(pendingDir())
 	if err != nil {
 		return nil

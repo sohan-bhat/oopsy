@@ -198,3 +198,16 @@ func TestGenericInPlaceOverwrite(t *testing.T) {
 	}
 	compareTrees(t, before, without(snapshotTree(t, root, false), ".git"))
 }
+
+// Undoing an overwrite puts the old file back in place while the file is
+// still what the command left, instead of keeping both copies.
+func TestOverwriteUndoSwapsBack(t *testing.T) {
+	e := newEnv(t)
+	f := filepath.Join(e.work, "notes.txt")
+	os.WriteFile(f, []byte("precious\n"), 0o644)
+	e.guarded("echo clobbered > notes.txt")
+	out := e.mustOops("-y")
+	if b, _ := os.ReadFile(f); string(b) != "precious\n" || strings.Contains(out, "kept both") {
+		t.Fatalf("got %q\n%s", b, out)
+	}
+}
