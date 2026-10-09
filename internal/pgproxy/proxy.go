@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -297,6 +298,16 @@ type unit struct {
 	stmtIdx int
 	done    chan []uint32 // closed or sent when a captured unit finishes
 	oids    []uint32
+	tags    []string            // command tags the server sent for this unit
+	after   func(tags []string) // run once the unit finished or was skipped
+}
+
+// finish runs a unit's after hook once.
+func (u *unit) finish() {
+	if f := u.after; f != nil {
+		u.after = nil
+		f(u.tags)
+	}
 }
 
 type session struct {
@@ -329,6 +340,7 @@ func (s *session) push(u *unit) {
 		if u.done != nil {
 			close(u.done)
 		}
+		u.finish()
 		return
 	}
 	s.fifo = append(s.fifo, u)
@@ -377,6 +389,9 @@ func (s *session) serverLoop() error {
 				}
 			}
 			continue
+		}
+		if t == 'C' {
+			head.tags = append(head.tags, strings.TrimSuffix(string(body), "\x00"))
 		}
 		out := raw
 		forward := !head.swallow
@@ -436,6 +451,7 @@ func (s *session) serverLoop() error {
 				if u.done != nil {
 					close(u.done)
 				}
+				u.finish()
 			}
 			s.fifo = append([]*unit{head}, keep...)
 		}
@@ -450,6 +466,10 @@ func (s *session) serverLoop() error {
 			}
 		}
 		s.mu.Unlock()
+		if ends {
+			// Before the final message, so the client sees the outcome.
+			head.finish()
+		}
 		if forward {
 			if err := s.toClient(out); err != nil {
 				return err
@@ -487,12 +507,13 @@ func (s *session) clientLoop(cr *bufio.Reader) error {
 			err = s.send(&unit{kind: 'B'}, frame(t, body))
 		case 'E':
 			var m pgproto3.Execute
+			var after func([]string)
 			if m.Decode(body) == nil {
-				if err := s.beforeExecute(m.Portal); err != nil {
+				if after, err = s.beforeExecute(m.Portal); err != nil {
 					return err
 				}
 			}
-			err = s.send(&unit{kind: 'E'}, frame(t, body))
+			err = s.send(&unit{kind: 'E', after: after}, frame(t, body))
 		case 'D':
 			err = s.send(&unit{kind: 'D'}, frame(t, body))
 		case 'C':
@@ -536,6 +557,14 @@ func (s *session) handleQuery(body []byte) error {
 	if err != nil || len(plans) == 0 {
 		return s.send(&unit{kind: 'Q'}, frame('Q', body))
 	}
+	if len(plans) == 1 && plans[0].Database != "" {
+		// DROP DATABASE has to be the only statement in the query.
+		var after func([]string)
+		if len(locs) == 1 {
+			after = s.beforeDropDatabase(plans[0])
+		}
+		return s.send(&unit{kind: 'Q', after: after}, frame('Q', body))
+	}
 	var b strings.Builder
 	last := 0
 	for _, p := range plans {
@@ -568,19 +597,22 @@ func (s *session) handleQuery(body []byte) error {
 
 // beforeExecute injects snapshot statements, using the client's own bound
 // parameters, before a destructive portal runs.
-func (s *session) beforeExecute(portalName string) error {
+func (s *session) beforeExecute(portalName string) (func([]string), error) {
 	pt := s.portals[portalName]
 	if pt == nil {
-		return nil
+		return nil, nil
 	}
 	st := s.stmts[pt.stmt]
 	if st == nil {
-		return nil
+		return nil, nil
 	}
 	// Plans carry group names, so each execution gets fresh ones.
 	plans, _ := Plan(st.query)
 	if len(plans) == 0 {
-		return nil
+		return nil, nil
+	}
+	if plans[0].Database != "" {
+		return s.beforeDropDatabase(plans[0]), nil
 	}
 	oids := st.oids
 	needParams := false
@@ -606,16 +638,16 @@ func (s *session) beforeExecute(portalName string) error {
 			fl, _ := (&pgproto3.Flush{}).Encode(nil)
 			s.push(u)
 			if _, err := s.up.Write(append(db, fl...)); err != nil {
-				return err
+				return nil, err
 			}
 			select {
 			case got, ok := <-u.done:
 				if !ok || got == nil {
-					return nil // server is skipping until Sync; nothing will run
+					return nil, nil // server is skipping until Sync; nothing will run
 				}
 				oids = got
 			case <-time.After(30 * time.Second):
-				return errors.New("timed out waiting for parameter types")
+				return nil, errors.New("timed out waiting for parameter types")
 			}
 		}
 	}
@@ -643,7 +675,55 @@ func (s *session) beforeExecute(portalName string) error {
 		s.push(u)
 	}
 	_, err := s.up.Write(buf)
-	return err
+	return nil, err
+}
+
+// notice sends the client a NoticeResponse, which every driver shows or logs.
+func (s *session) notice(severity, msg string) {
+	n := &pgproto3.NoticeResponse{Severity: severity, SeverityUnlocalized: severity, Code: "01000", Message: msg}
+	if b, err := n.Encode(nil); err == nil {
+		_ = s.toClient(b)
+	}
+}
+
+// beforeDropDatabase dumps the database about to be dropped. Without a dump
+// the statement still runs, and the client and the log are told why there
+// is no way back. The returned hook journals the dump once the drop
+// succeeded and deletes it otherwise.
+func (s *session) beforeDropDatabase(pl StmtPlan) func([]string) {
+	s.p.logPlan(pl)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Hour)
+	defer cancel()
+	d, _, err := dumpDatabase(ctx, s.p.Upstream, pl.Database, pl.Text)
+	if err != nil {
+		msg := fmt.Sprintf("oopsy took no dump of database %s, so this DROP DATABASE cannot be undone: %v", pl.Database, err)
+		s.p.Log.Print(msg)
+		s.notice("WARNING", msg)
+		return nil
+	}
+	if d == nil {
+		return nil
+	}
+	pct := 0.0
+	if d.DBSize > 0 {
+		pct = 100 * float64(d.Size) / float64(d.DBSize)
+	}
+	s.p.Log.Printf("saved a %s dump of database %s (%.0f%% of its %s)", HumanBytes(d.Size), d.Database, pct, HumanBytes(d.DBSize))
+	return func(tags []string) {
+		for _, t := range tags {
+			if t == "DROP DATABASE" {
+				saved, err := addDump(*d)
+				if err != nil {
+					s.p.Log.Printf("could not journal the dump of %s: %v (it is at %s)", d.Database, err, d.File)
+					return
+				}
+				s.notice("NOTICE", fmt.Sprintf("oopsy saved a %s dump of database %s first; oops db undo %s brings it back", HumanBytes(d.Size), d.Database, saved.Label()))
+				return
+			}
+		}
+		os.Remove(d.File)
+		s.p.Log.Printf("DROP DATABASE %s did not run, so its dump was deleted", d.Database)
+	}
 }
 
 func (p *Proxy) logPlan(sp StmtPlan) {

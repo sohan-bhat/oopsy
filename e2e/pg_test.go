@@ -132,11 +132,12 @@ type proxyProc struct {
 	log *strings.Builder
 }
 
-func (e *env) startProxy(t *testing.T, upstream string) *proxyProc {
+// startProxy runs oops db proxy; extra environment entries override the test defaults.
+func (e *env) startProxy(t *testing.T, upstream string, extra ...string) *proxyProc {
 	t.Helper()
 	port := freePort()
 	cmd := exec.Command(bin, "db", "proxy", "--upstream", upstream, "--listen", fmt.Sprintf("127.0.0.1:%d", port))
-	cmd.Env = e.environ()
+	cmd.Env = append(e.environ(), extra...)
 	var logb strings.Builder
 	cmd.Stderr = &syncWriter{b: &logb}
 	if err := cmd.Start(); err != nil {

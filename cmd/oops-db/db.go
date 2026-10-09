@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -38,6 +39,10 @@ func main() {
 		ui.Errorf("%v", err)
 		os.Exit(1)
 	}
+}
+
+func warnf(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, "%s %s\n", ui.ErrWarn("warn"), fmt.Sprintf(format, a...))
 }
 
 func pad(s string, n int) string {
@@ -267,6 +272,14 @@ func kindLabel(k string) string {
 	}[k]
 }
 
+// listRow is one line of oops db list: a change journaled in the database
+// or a dump taken before DROP DATABASE.
+type listRow struct {
+	id, kind, rows, target, stmt string
+	created                      time.Time
+	restored                     bool
+}
+
 func dbListCmd() *cobra.Command {
 	var u string
 	var n int
@@ -275,33 +288,56 @@ func dbListCmd() *cobra.Command {
 		Short: "Show recent destructive statements that can be undone",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := context.Background()
+			dumps, derr := pgproxy.ListDumps()
+			if derr != nil {
+				warnf("could not read the database dumps: %v", derr)
+			}
+			var rows []listRow
 			conn, err := connect(u)
 			if err != nil {
-				return err
+				if len(dumps) == 0 {
+					return err
+				}
+				warnf("could not reach the database, showing dumps only: %v", err)
+			} else {
+				defer conn.Close(ctx)
+				list, err := pgproxy.ListChanges(ctx, conn, n)
+				if err != nil {
+					return err
+				}
+				for _, ch := range list {
+					rows = append(rows, listRow{id: strconv.FormatInt(ch.ID, 10), kind: kindLabel(ch.Kind()), rows: strconv.FormatInt(ch.Rows(), 10),
+						target: strings.Join(ch.Tables(), ", "), stmt: ch.Statement, created: ch.Created, restored: ch.Restored != nil})
+				}
 			}
-			defer conn.Close(context.Background())
-			list, err := pgproxy.ListChanges(context.Background(), conn, n)
-			if err != nil {
-				return err
+			for _, d := range dumps {
+				target := fmt.Sprintf("%s on %s (%s dump)", d.Database, d.Server, pgproxy.HumanBytes(d.Size))
+				rows = append(rows, listRow{id: d.Label(), kind: "DROP DATABASE", target: target,
+					stmt: d.Statement, created: d.Created, restored: d.Restored != nil})
 			}
-			if len(list) == 0 {
+			sort.SliceStable(rows, func(a, b int) bool { return rows[a].created.After(rows[b].created) })
+			if len(rows) > n {
+				rows = rows[:n]
+			}
+			if len(rows) == 0 {
 				fmt.Println("No database snapshots yet. Run your app or agent through oops db proxy or oops db wrap.")
 				return nil
 			}
-			fmt.Printf("%s  %s  %s  %s  %s\n", ui.Dim(pad("ID", 5)), ui.Dim(pad("WHEN", 11)), ui.Dim(pad("KIND", 12)), ui.Dim(pad("ROWS", 8)), ui.Dim("TARGET"))
-			for _, ch := range list {
-				id := pad(strconv.FormatInt(ch.ID, 10), 5)
-				if ch.Restored == nil {
-					id = ui.Accent(id)
-				} else {
+			fmt.Printf("%s  %s  %s  %s  %s\n", ui.Dim(pad("ID", 5)), ui.Dim(pad("WHEN", 11)), ui.Dim(pad("KIND", 13)), ui.Dim(pad("ROWS", 8)), ui.Dim("TARGET"))
+			for _, r := range rows {
+				id := pad(r.id, 5)
+				if r.restored {
 					id = ui.Dim(id)
+				} else {
+					id = ui.Accent(id)
 				}
-				line := fmt.Sprintf("%s  %s  %s  %s  %s", id, pad(ago(ch.Created), 11), pad(kindLabel(ch.Kind()), 12), pad(strconv.FormatInt(ch.Rows(), 10), 8), strings.Join(ch.Tables(), ", "))
-				if ch.Restored != nil {
+				line := fmt.Sprintf("%s  %s  %s  %s  %s", id, pad(ago(r.created), 11), pad(r.kind, 13), pad(r.rows, 8), r.target)
+				if r.restored {
 					line += " " + ui.Dim("(restored)")
 				}
 				fmt.Println(line)
-				fmt.Printf("       %s\n", ui.Dim(ui.Shorten(ch.Statement, 90)))
+				fmt.Printf("       %s\n", ui.Dim(ui.Shorten(r.stmt, 90)))
 			}
 			return nil
 		},
@@ -309,6 +345,40 @@ func dbListCmd() *cobra.Command {
 	c.Flags().StringVar(&u, "url", "", "database URL (defaults to the last proxied upstream)")
 	c.Flags().IntVarP(&n, "number", "n", 20, "how many to show")
 	return c
+}
+
+func confirmRestore(yes bool) (bool, error) {
+	if yes {
+		return true, nil
+	}
+	if !ui.Interactive() {
+		return false, errors.New("no terminal to confirm on; run with -y to restore without asking")
+	}
+	if !ui.Confirm("Restore it?") {
+		fmt.Println("Nothing changed.")
+		return false, nil
+	}
+	return true, nil
+}
+
+func undoDump(d *pgproxy.Dump, yes bool) error {
+	fmt.Printf("%s  %s\n", ui.Accent("Database dump "+d.Label()), ui.Dim(ago(d.Created)))
+	fmt.Printf("  %s %s\n\n", ui.Dim(">"), ui.Shorten(d.Statement, 200))
+	if d.Restored != nil {
+		fmt.Println(ui.Warn("This database was already restored " + ago(*d.Restored) + "."))
+	}
+	fmt.Println("This will:")
+	fmt.Printf("  create database %s on %s again and restore it from the %s dump taken before it was dropped\n\n", d.Database, d.Server, pgproxy.HumanBytes(d.Size))
+	if ok, err := confirmRestore(yes); !ok || err != nil {
+		return err
+	}
+	line, err := pgproxy.RestoreDump(context.Background(), *d)
+	if err != nil {
+		return fmt.Errorf("undo failed: %w", err)
+	}
+	fmt.Printf("  %s %s\n", ui.Good("done"), line)
+	fmt.Println(ui.Good(fmt.Sprintf("Restored database dump %s.", d.Label())))
+	return nil
 }
 
 func dbUndoCmd() *cobra.Command {
@@ -321,14 +391,37 @@ func dbUndoCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var id int64
 			if len(args) == 1 {
-				v, err := strconv.ParseInt(strings.TrimPrefix(args[0], "#"), 10, 64)
+				arg := strings.TrimPrefix(args[0], "#")
+				if strings.HasPrefix(strings.ToLower(arg), "d") {
+					d, err := pgproxy.FindDump(arg)
+					if err != nil {
+						return err
+					}
+					return undoDump(d, yes)
+				}
+				v, err := strconv.ParseInt(arg, 10, 64)
 				if err != nil {
 					return fmt.Errorf("%q is not an id (see oops db list)", args[0])
 				}
 				id = v
 			}
+			// With no id, the newest unrestored change wins, whether it lives
+			// in the database or is a dump taken before DROP DATABASE.
+			var newestDump *pgproxy.Dump
+			if id == 0 {
+				dumps, _ := pgproxy.ListDumps()
+				for i := range dumps {
+					if dumps[i].Restored == nil {
+						newestDump = &dumps[i]
+						break
+					}
+				}
+			}
 			conn, err := connect(u)
 			if err != nil {
+				if newestDump != nil {
+					return undoDump(newestDump, yes)
+				}
 				return err
 			}
 			ctx := context.Background()
@@ -336,6 +429,9 @@ func dbUndoCmd() *cobra.Command {
 			ch, err := pgproxy.FindChange(ctx, conn, id)
 			if err != nil {
 				return err
+			}
+			if newestDump != nil && (ch == nil || newestDump.Created.After(ch.Created)) {
+				return undoDump(newestDump, yes)
 			}
 			if ch == nil {
 				fmt.Println("Nothing to undo.")
@@ -351,14 +447,8 @@ func dbUndoCmd() *cobra.Command {
 				fmt.Println("  " + l)
 			}
 			fmt.Println()
-			if !yes {
-				if !ui.Interactive() {
-					return errors.New("no terminal to confirm on; run with -y to restore without asking")
-				}
-				if !ui.Confirm("Restore it?") {
-					fmt.Println("Nothing changed.")
-					return nil
-				}
+			if ok, err := confirmRestore(yes); !ok || err != nil {
+				return err
 			}
 			res, err := pgproxy.Undo(ctx, conn, *ch)
 			if err != nil {
@@ -387,16 +477,24 @@ func dbPruneCmd() *cobra.Command {
 		Short: "Drop database snapshots that were restored or are older than --days",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			age := time.Duration(days) * 24 * time.Hour
+			nd, err := pgproxy.PruneDumps(age, true)
+			if err != nil {
+				warnf("could not prune database dumps: %v", err)
+			}
 			conn, err := connect(u)
 			if err != nil {
+				if nd > 0 {
+					fmt.Printf("Deleted %s.\n", ui.Plural(nd, "database dump"))
+				}
 				return err
 			}
 			defer conn.Close(context.Background())
-			n, err := pgproxy.Prune(context.Background(), conn, time.Duration(days)*24*time.Hour, true)
+			n, err := pgproxy.Prune(context.Background(), conn, age, true)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Dropped %s.\n", ui.Plural(n, "snapshot"))
+			fmt.Printf("Dropped %s and deleted %s.\n", ui.Plural(n, "snapshot"), ui.Plural(nd, "database dump"))
 			return nil
 		},
 	}
