@@ -82,6 +82,7 @@ BEGIN
   END IF;
   INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, snap, key_cols, row_count, statement)
   VALUES (p_grp, p_kind, ns, nm, p_snap, k, n, p_stmt);
+  PERFORM oops._mark(r, CASE p_kind WHEN 'delete' THEN 'd' ELSE 'u' END);
   IF p_kind = 'delete' THEN
     n := n + oops._snap_fk_children(r, p_snap, p_grp, p_stmt, 0);
   END IF;
@@ -129,6 +130,7 @@ BEGIN
     SELECT nspname, relname INTO ns, nm FROM pg_class cl JOIN pg_namespace s ON s.oid = cl.relnamespace WHERE cl.oid = c.child;
     INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, snap, key_cols, row_count, statement)
     VALUES (p_grp, kind, ns, nm, child_snap, k, n, p_stmt);
+    PERFORM oops._mark(c.child, CASE WHEN c.confdeltype = 'c' THEN 'd' ELSE 'u' END);
     total := total + n;
     IF c.confdeltype = 'c' THEN
       total := total + oops._snap_fk_children(c.child, child_snap, p_grp, p_stmt, depth + 1);
@@ -144,9 +146,13 @@ CREATE OR REPLACE FUNCTION oops.snap_table(p_rel text, p_grp text, p_kind text, 
 RETURNS bigint LANGUAGE plpgsql AS $f$
 DECLARE
   r regclass := to_regclass(p_rel);
+  n bigint;
 BEGIN
   IF r IS NULL THEN RETURN 0; END IF;
-  RETURN oops._snap_whole(r, p_grp, p_kind, p_stmt, p_cascade);
+  n := oops._snap_whole(r, p_grp, p_kind, p_stmt, p_cascade);
+  PERFORM oops._mark(to_regclass(format('%I.%I', rel_schema, rel_name)), CASE p_kind WHEN 'truncate' THEN 't' ELSE 'ud' END)
+     FROM oops.journal WHERE grp = p_grp;
+  RETURN n;
 END
 $f$;
 
@@ -247,7 +253,8 @@ BEGIN
               WHERE contype = 'f' AND (conrelid = r OR confrelid = r) LOOP
     post := post || format('ALTER TABLE %s ADD CONSTRAINT %I %s', oops.qualified(rec.onrel), rec.conname, rec.def);
   END LOOP;
-  FOR rec IN SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgrelid = r AND NOT tgisinternal LOOP
+  -- oops db protect attaches its own triggers to recreated tables.
+  FOR rec IN SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgrelid = r AND NOT tgisinternal AND tgname NOT LIKE 'oops\_audit\_%' LOOP
     post := post || rec.def;
   END LOOP;
   FOR rec IN
@@ -287,7 +294,8 @@ BEGIN
   EXECUTE format('CREATE TABLE oops.%I AS TABLE %s', snap, r);
   EXECUTE format('SELECT count(*) FROM oops.%I', snap) INTO n;
   INSERT INTO oops.journal (grp, kind, rel_schema, rel_name, snap, key_cols, ddl, ddl_post, meta, row_count, statement)
-  VALUES (p_grp, 'drop_table', ns, nm, snap, oops.key_cols(r), d.ddl, d.post, d.meta, n, p_stmt);
+  VALUES (p_grp, 'drop_table', ns, nm, snap, oops.key_cols(r), d.ddl, d.post, d.meta || jsonb_build_object('oid', r::oid), n, p_stmt);
+  PERFORM oops._mark(r, 'x');
   RETURN n;
 END
 $f$;
@@ -299,7 +307,8 @@ DECLARE
   t regclass;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = p_schema) OR p_schema = 'oops' THEN RETURN 0; END IF;
-  INSERT INTO oops.journal (grp, kind, rel_schema, row_count, statement) VALUES (p_grp, 'drop_schema', p_schema, 0, p_stmt);
+  INSERT INTO oops.journal (grp, kind, rel_schema, row_count, statement, meta)
+  VALUES (p_grp, 'drop_schema', p_schema, 0, p_stmt, jsonb_build_object('oid', (SELECT oid FROM pg_namespace WHERE nspname = p_schema)));
   FOR t IN SELECT c.oid::regclass FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
             WHERE s.nspname = p_schema AND c.relkind IN ('r', 'p') AND NOT c.relispartition ORDER BY c.oid LOOP
     n := n + oops.snap_drop_table(oops.qualified(t), p_grp, p_stmt);
