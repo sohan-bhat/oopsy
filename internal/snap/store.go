@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,10 @@ type Config struct {
 	Quiet          bool  `json:"quiet"`
 	// RebuildableKeepDays is how long node_modules and friends are kept.
 	RebuildableKeepDays int `json:"rebuildable_keep_days,omitempty"`
+	// Store puts snapshots, mirrors and objects on another drive, so they
+	// survive the main disk dying. Clones and hard links cannot cross
+	// drives, so this costs one full compressed copy plus changes.
+	Store string `json:"store,omitempty"`
 	// NoPreload turns off the Linux preload library.
 	NoPreload bool `json:"no_preload,omitempty"`
 	// MirrorMaxFiles caps the projects the generic layer mirrors.
@@ -49,7 +54,19 @@ func Dir() string {
 	return filepath.Join(home, ".oops")
 }
 
-func snapsDir() string { return filepath.Join(Dir(), "snapshots") }
+// StoreDir is where snapshots, mirrors and objects live: the store setting
+// when one is set (a second drive), else the Oopsy home.
+func StoreDir() string {
+	if s := LoadConfig().Store; s != "" {
+		return s
+	}
+	return Dir()
+}
+
+// SecondStore reports a store on another drive than the Oopsy home.
+func SecondStore() string { return LoadConfig().Store }
+
+func snapsDir() string { return filepath.Join(StoreDir(), "snapshots") }
 
 // SnapDir returns the directory for snapshot id.
 func SnapDir(id int) string { return filepath.Join(snapsDir(), strconv.Itoa(id)) }
@@ -59,8 +76,27 @@ func ConfigPath() string { return filepath.Join(Dir(), "config.json") }
 
 // LoadConfig reads settings, filling in defaults.
 func LoadConfig() Config {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	path := ConfigPath()
+	if cfgCache != nil && cfgPath == path && time.Since(cfgAt) < time.Second {
+		return *cfgCache
+	}
+	cfg := loadConfig(path)
+	cfgCache, cfgPath, cfgAt = &cfg, path, time.Now()
+	return cfg
+}
+
+var (
+	cfgMu    sync.Mutex
+	cfgCache *Config
+	cfgPath  string
+	cfgAt    time.Time
+)
+
+func loadConfig(path string) Config {
 	cfg := DefaultConfig
-	b, err := os.ReadFile(ConfigPath())
+	b, err := os.ReadFile(path)
 	if err == nil {
 		_ = json.Unmarshal(b, &cfg)
 	}
@@ -79,6 +115,9 @@ func LoadConfig() Config {
 
 // SaveConfig writes settings.
 func SaveConfig(cfg Config) error {
+	cfgMu.Lock()
+	cfgCache = nil
+	cfgMu.Unlock()
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {
 		return err
 	}

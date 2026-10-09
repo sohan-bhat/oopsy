@@ -141,6 +141,11 @@ func Create(command, cwd, source string, actions []classify.Action, captures ...
 // (NTFS compressed on Windows) when the disk keeps its free space floor.
 func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, error) {
 	p := e.Orig
+	if SecondStore() != "" {
+		// The store is on another drive on purpose: real copies, never
+		// clones or links that share the first disk's blocks.
+		return s.copyEntry(e, deleteOnly, cfg)
+	}
 	if method != "copy" && !sameDevice(p, s.Dir()) {
 		e.Base = s.volumeDir(p)
 	}
@@ -174,8 +179,15 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, err
 	if e.Base != "" {
 		_ = forceRemove(dst)
 		e.Base = "" // copies go to the main store
-		dst = s.EntryPath(*e)
 	}
+	return s.copyEntry(e, deleteOnly, cfg)
+}
+
+// copyEntry saves e.Orig as a real copy: NTFS compressed on Windows, zstd
+// compressed elsewhere, when the disk keeps its free space floor.
+func (s *Snapshot) copyEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, error) {
+	p := e.Orig
+	dst := s.EntryPath(*e)
 	size, n, _ := treeSize(p)
 	if sp, err := SpaceAt(filepath.Dir(dst), cfg); err == nil && !sp.Allows(size) {
 		err := errNoSpace(size, sp)
@@ -190,7 +202,7 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, err
 	if !ntfsCompression {
 		fileCopy, m = zcopyFile, "zstd copy"
 	}
-	skipped, err = copyTree(p, dst, fileCopy)
+	skipped, err := copyTree(p, dst, fileCopy)
 	if err != nil {
 		_ = forceRemove(dst)
 		return []Skip{{Path: p, Reason: "copy failed: " + skipReason(err)}}, err
@@ -207,7 +219,7 @@ func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, cfg Config) ([]Skip, err
 func refuse(p string) string {
 	home, _ := os.UserHomeDir()
 	oops := Dir()
-	if within(p, oops) || inVolumeStore(p) {
+	if within(p, oops) || within(p, StoreDir()) || inVolumeStore(p) {
 		return "this is Oopsy's own storage"
 	}
 	if filepath.Dir(p) == p || (home != "" && within(home, p)) || within(oops, p) {

@@ -199,9 +199,9 @@ type MirrorStatus struct {
 // Mirrors lists the mirrors in the main store.
 func Mirrors() []MirrorStatus {
 	var out []MirrorStatus
-	ents, _ := os.ReadDir(filepath.Join(Dir(), "mirrors"))
+	ents, _ := os.ReadDir(filepath.Join(StoreDir(), "mirrors"))
 	for _, e := range ents {
-		m := &Mirror{Dir: filepath.Join(Dir(), "mirrors", e.Name())}
+		m := &Mirror{Dir: filepath.Join(StoreDir(), "mirrors", e.Name())}
 		mm, err := m.meta()
 		if err != nil {
 			continue
