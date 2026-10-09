@@ -77,6 +77,19 @@ jobs:
           docker pull -q alpine:3.20
           echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
           echo "OOPS_TEST_REMOTE=1" >> "$GITHUB_ENV"
+      - name: Download Clink for the cmd.exe hook tests (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $rel = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } https://api.github.com/repos/chrisant996/clink/releases/latest
+          $zip = $rel.assets | Where-Object { $_.name -match '^clink\.[0-9.]+\.[0-9a-f]+\.zip$' } | Select-Object -First 1
+          Invoke-WebRequest $zip.browser_download_url -OutFile "$env:RUNNER_TEMP\clink.zip"
+          Expand-Archive "$env:RUNNER_TEMP\clink.zip" "$env:RUNNER_TEMP\clink"
+          Get-ChildItem "$env:RUNNER_TEMP\clink" | Format-Table Name, Length
+          echo "OOPS_TEST_CLINK=$env:RUNNER_TEMP\clink" >> $env:GITHUB_ENV
       - run: go vet ./...
       - run: go test ./internal/... ./cmd/...
       - if: success() || failure()
