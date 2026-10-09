@@ -98,8 +98,11 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	if cmd == "" || readOnlyFor(base, tool, cmd) {
 		return 0
 	}
+	trace("read only check")
 	res := classifyFor(base, tool, cmd, cwd)
+	trace("classify")
 	actions := append(res.Actions, lazyActions(cmd, cwd)...)
+	trace("rebuildable folders")
 	caps := remote.Plan(cmd, cwd, os.Environ())
 	var s *snap.Snapshot
 	if len(actions) > 0 || len(caps) > 0 {
@@ -110,6 +113,7 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 	}
 	beforeCommand(base, cmd, cwd, session, s, stderr)
+	trace("mirror sync")
 	if s == nil {
 		return 0
 	}
