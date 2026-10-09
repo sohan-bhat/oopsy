@@ -630,7 +630,7 @@ func explainCmd() *cobra.Command {
 func configCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "config [key value]",
-		Short: "Show or change settings (keep_days, max_gb, free_floor_gb, quiet)",
+		Short: "Show or change settings (keep_days, max_gb, free_floor_gb, quiet, store)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := snap.LoadConfig()
@@ -643,6 +643,11 @@ func configCmd() *cobra.Command {
 					fmt.Printf("free_floor_gb auto (5%% of the disk, between 2 and 20 GB)\n")
 				}
 				fmt.Printf("quiet        %v\n", cfg.Quiet)
+				if cfg.Store != "" {
+					fmt.Printf("store        %s\n", cfg.Store)
+				} else {
+					fmt.Printf("store        %s (set store to a folder on another drive to survive a dead disk)\n", ui.HomeRel(snap.Dir()))
+				}
 				fmt.Println(ui.Dim("Stored in " + ui.HomeRel(snap.ConfigPath())))
 				return nil
 			}
@@ -673,6 +678,20 @@ func configCmd() *cobra.Command {
 				cfg.FreeFloorBytes = int64(f * (1 << 30))
 			case "quiet":
 				cfg.Quiet = v == "true" || v == "1" || v == "yes"
+			case "store":
+				if v == "none" || v == "" {
+					cfg.Store = ""
+					break
+				}
+				dir, err := filepath.Abs(v)
+				if err != nil {
+					return err
+				}
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					return fmt.Errorf("cannot use %s as the store: %v", dir, err)
+				}
+				cfg.Store = dir
+				fmt.Println(ui.Dim("Snapshots, mirrors and objects now go to " + ui.HomeRel(dir) + ". Clones and hard links cannot cross drives, so each project costs one full compressed copy there, plus the changes. That is what keeps them safe if this disk dies."))
 			default:
 				return fmt.Errorf("unknown setting %q", args[0])
 			}
