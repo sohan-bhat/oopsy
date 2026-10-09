@@ -39,6 +39,8 @@ func cmdInstalled() bool {
 // installed, the Lua script. It is run again on every oops init so the
 // files follow the oops binary if it moves.
 func writeCmdFiles(bin string, clink bool) error {
+	// cmd reads a slash in a bare command name as the start of a switch.
+	bin = strings.ReplaceAll(bin, "/", `\`)
 	files := map[string]string{
 		cmdAutoRunFile(): cmdAutoRunBatch(cmdMacroFile()),
 		cmdHookFile():    cmdHookBatch(bin, false),
