@@ -18,10 +18,12 @@ const DefaultMirrorMaxFiles = 50000
 func (m *Mirror) sync(attr *Pending, limit int) (*SyncResult, error) {
 	start := time.Now()
 	old, _ := readIndex(m.indexPath())
+	Trace("read index")
 	w, err := walkProject(m.Root, limit)
 	if err != nil {
 		return nil, err
 	}
+	Trace("walk")
 	res := &SyncResult{Files: w.files}
 	cur := w.nodes
 
@@ -76,10 +78,14 @@ func (m *Mirror) sync(attr *Pending, limit int) (*SyncResult, error) {
 		m.put(n)
 	}
 	m.addAll(added)
+	Trace("diff and update")
 	m.clearPrewrite()
-	if err := writeIndex(m.indexPath(), cur); err != nil {
-		return nil, err
+	if len(removed) > 0 || len(changed) > 0 || len(added) > 0 || indexChanged(old, cur) {
+		if err := writeIndex(m.indexPath(), cur); err != nil {
+			return nil, err
+		}
 	}
+	Trace("write index")
 	mm, _ := m.meta()
 	mm.Root, mm.Method, mm.Files, mm.Synced = m.Root, m.Method, w.files, time.Now()
 	if mm.Created.IsZero() {
@@ -93,6 +99,23 @@ func (m *Mirror) sync(attr *Pending, limit int) (*SyncResult, error) {
 	res.Millis = float64(time.Since(start).Microseconds()) / 1000
 	return res, nil
 }
+
+// indexChanged reports differences the diff does not count, such as a
+// folder's time or a file's mode.
+func indexChanged(old, cur []node) bool {
+	if len(old) != len(cur) {
+		return true
+	}
+	for i := range old {
+		if old[i] != cur[i] {
+			return true
+		}
+	}
+	return false
+}
+
+// Trace reports progress through a sync when hooks are tracing.
+var Trace = func(string) {}
 
 // oldStamps carries the pre change node of each changed file from the merge
 // to attribute. Syncs never run concurrently in one process.
