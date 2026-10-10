@@ -144,7 +144,7 @@
       </li>
       <li class="step">
         <h3 class="step__title">It snapshots first</h3>
-        <p>When a command is about to destroy files, Oopsy saves them first. Copy on write clones on APFS, Btrfs, XFS and ReFS, and hard links for plain deletes on NTFS and ext4, make that instant and nearly free on disk.</p>
+        <p>When a command is about to destroy files, Oopsy saves them first. It reads the command for what it names, and keeps a mirror of your project for everything else, so <code>make clean</code>, <code>npm run reset</code> and scripts it has never seen are undoable too. Copy on write clones on APFS, Btrfs, XFS and ReFS, and hard links on NTFS and ext4, make that instant and nearly free on disk.</p>
         <p class="step__more">It reads the command with a real shell parser, so it knows <code>rm</code>, <code>mv</code>, <code>cp</code>, <code>sed -i</code>, <code>dd</code>, <code>find -delete</code>, <code>rsync --delete</code>, redirects, and <code>git reset</code>, <code>clean</code>, <code>checkout</code>, <code>branch -D</code>, <code>stash drop</code> and <code>push --force</code>. On Windows it also reads PowerShell, like <code>Remove-Item -Recurse</code> and <code>Get-ChildItem *.log | Remove-Item</code>, and cmd.exe, like <code>rd /s /q</code>.</p>
       </li>
       <li class="step">
@@ -197,7 +197,8 @@
     <div>
       <h2 class="h2">What it does not catch</h2>
       <ul class="limits" role="list" id="limits">
-        <li>Programs that delete things themselves. Oopsy reads the command line, so <code>make clean</code>, <code>npm run reset</code> or a script that removes files is invisible to it.</li>
+        <li>A program that writes into a file in place on NTFS, or a statically linked one doing so on ext4. The project mirror there shares the file through a hard link, so Oopsy sees the change but cannot keep the old version, and says so.</li>
+        <li>A rebuildable folder like <code>node_modules</code> deleted by a program that never names it anywhere Oopsy can read. Rebuild it.</li>
         <li>File edits made in an editor, or by an agent's own edit tool instead of the shell.</li>
         <li>Anything remote, like <code>ssh</code>, <code>kubectl delete</code> or <code>terraform destroy</code>.</li>
         <li>Database changes that skip the proxy, plus <code>DROP DATABASE</code>, <code>DROP VIEW</code> and upserts.</li>
@@ -224,6 +225,10 @@
       <details class="qa">
         <summary>Why not Time Machine?</summary>
         <p>Time Machine runs about once an hour, to another disk, and getting a folder back means scrolling through a timeline. Oopsy snapshots the exact moment before the command and restores in one word. Keep both.</p>
+      </details>
+      <details class="qa">
+        <summary>Does it catch make clean and my own scripts?</summary>
+        <p>Yes. Besides reading the command line, Oopsy keeps a mirror of each project you work in, where every file is a copy on write clone or a hard link, so it costs almost no disk. A quick walk before each command keeps it current, and whatever the command changes or deletes moves into its snapshot. Read only commands like <code>ls</code> and <code>git status</code> are skipped at no cost. Folders you can rebuild, like <code>node_modules</code>, are saved whole only when a command or its script names them.</p>
       </details>
       <details class="qa">
         <summary>How much disk does it use?</summary>
