@@ -15,7 +15,7 @@ import (
 // identical versions are stored once however many snapshots use them. Agent
 // edits and watch mode save single files here.
 
-func objectsDir() string { return filepath.Join(Dir(), "objects") }
+func objectsDir() string { return filepath.Join(StoreDir(), "objects") }
 
 // ObjectPath is where the object with this sha256 hash lives.
 func ObjectPath(hash string) string {
@@ -58,7 +58,7 @@ func PutObject(src string) (Object, error) {
 		_ = os.Chtimes(dst, now, now) // keep it from looking unused while pruning
 		return o, nil
 	}
-	if sp, err := SpaceAt(Dir(), LoadConfig()); err == nil && !sp.Allows(fi.Size()) {
+	if sp, err := SpaceAt(StoreDir(), LoadConfig()); err == nil && !sp.Allows(fi.Size()) {
 		return Object{}, errNoSpace(fi.Size(), sp)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {

@@ -88,7 +88,7 @@ func (e errTooBig) Error() string { return "too many files" }
 func walkProject(root string, limit int) (walkResult, error) {
 	ign := loadIgnore(root)
 	// Oopsy's own stores are skipped wherever they are inside the project.
-	skip := map[string]bool{pathKey(filepath.Clean(Dir())): true}
+	skip := map[string]bool{pathKey(filepath.Clean(Dir())): true, pathKey(filepath.Clean(StoreDir())): true}
 	if vr := volumeRoot(root); vr != "" {
 		if top := volumeTop(vr); top != "" {
 			skip[pathKey(filepath.Clean(top))] = true

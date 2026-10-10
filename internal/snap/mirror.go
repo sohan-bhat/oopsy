@@ -59,9 +59,11 @@ func mirrorKey(root string) string {
 // mirrorParent picks where root's mirror lives: the main store when it is on
 // the same volume, else the private store at the root of root's volume.
 func mirrorParent(root string) (string, bool) {
-	_ = os.MkdirAll(Dir(), 0o700)
-	if sameDevice(root, Dir()) {
-		return filepath.Join(Dir(), "mirrors"), false
+	store := StoreDir()
+	_ = os.MkdirAll(store, 0o700)
+	if SecondStore() != "" || sameDevice(root, store) {
+		// A second drive store holds the mirror itself, as real copies.
+		return filepath.Join(store, "mirrors"), false
 	}
 	vr := volumeRoot(root)
 	if vr == "" {
@@ -95,7 +97,11 @@ func OpenMirror(root string) (*Mirror, error) {
 		}
 		return m, nil
 	}
-	m.Method = probeMirrorMethod(m.Dir)
+	if SecondStore() != "" {
+		m.Method = "zstd copy"
+	} else {
+		m.Method = probeMirrorMethod(m.Dir)
+	}
 	if m.Method == "" {
 		return nil, ErrNoMirror
 	}
@@ -231,8 +237,15 @@ func (m *Mirror) put(n node) bool {
 
 // fileInto clones or links one file.
 func (m *Mirror) fileInto(src, dst string, fi os.FileInfo) error {
-	if m.Method == "hardlink" {
+	switch m.Method {
+	case "hardlink":
 		return os.Link(src, dst)
+	case "zstd copy":
+		if err := zcopyFile(src, dst, fi); err != nil {
+			return err
+		}
+		setMeta(dst, fi, false)
+		return nil
 	}
 	if err := cloneOnly(src, dst, fi); err != nil {
 		return err
