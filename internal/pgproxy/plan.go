@@ -30,6 +30,9 @@ type StmtPlan struct {
 	Group    string
 	Text     string
 	Snaps    []SnapSQL
+	// Database is set for DROP DATABASE, which the proxy saves with pg_dump
+	// outside the database instead of with snapshot statements.
+	Database string
 }
 
 var destructiveWord = regexp.MustCompile(`(?i)\b(delete|update|truncate|drop|alter|merge)\b`)
@@ -124,6 +127,10 @@ func planStmt(n *pg.Node, text string) *StmtPlan {
 			p.Targets = nil
 			whole(ins.Relation, "update_full")
 		}
+	case n.GetDropdbStmt() != nil:
+		p.Kind = "DROP DATABASE"
+		p.Database = n.GetDropdbStmt().Dbname
+		p.Targets = append(p.Targets, p.Database)
 	case n.GetMergeStmt() != nil:
 		p.Kind = "MERGE"
 		whole(n.GetMergeStmt().Relation, "update_full")
@@ -211,7 +218,7 @@ func planStmt(n *pg.Node, text string) *StmtPlan {
 			whole(rv, "update_full")
 		}
 	}
-	if len(p.Snaps) == 0 {
+	if len(p.Snaps) == 0 && p.Database == "" {
 		return nil
 	}
 	return p
