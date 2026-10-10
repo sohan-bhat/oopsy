@@ -321,6 +321,9 @@ func showCmd() *cobra.Command {
 			for _, g := range s.Git {
 				fmt.Printf("%s %s\n", ui.Bold("git"), describeGit(g))
 			}
+			for _, r := range s.Records {
+				fmt.Printf("%s  %s\n", ui.Bold(r.Label), ui.Dim(r.Kind+", "+ui.Bytes(r.Size)+" saved"))
+			}
 			for _, sk := range s.Skipped {
 				fmt.Printf("%s %s: %s\n", ui.Warn("not saved"), ui.HomeRel(sk.Path), sk.Reason)
 			}

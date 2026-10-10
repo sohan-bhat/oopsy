@@ -10,6 +10,7 @@ import (
 
 	"github.com/sohan-bhat/oopsy/internal/classify"
 	"github.com/sohan-bhat/oopsy/internal/hooks"
+	"github.com/sohan-bhat/oopsy/internal/remote"
 	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
 )
@@ -30,9 +31,13 @@ func explainLine(w io.Writer, line, cwd string) {
 		return
 	}
 	res := classify.Classify(line, cwd, os.Environ())
+	targets := remote.Targets(line, cwd, os.Environ())
 	lazy := hooks.LazyTargets(line, cwd)
-	if res.Destructive() || len(lazy) > 0 {
+	if res.Destructive() || len(targets) > 0 || len(lazy) > 0 {
 		fmt.Fprintln(w, ui.Warn("Destructive.")+" Before it runs, Oopsy saves:")
+		for _, t := range targets {
+			fmt.Fprintf(w, "  %s\n", t.Describe)
+		}
 		for _, a := range res.Actions {
 			for _, l := range describeAction(a, line) {
 				fmt.Fprintf(w, "  %s\n", l)
@@ -49,7 +54,7 @@ func explainLine(w io.Writer, line, cwd string) {
 	switch {
 	case root == "":
 		fmt.Fprintf(w, "%s is too broad to mirror (a home folder, a disk root or a system folder), so only what the command names is saved.\n", ui.HomeRel(cwd))
-	case res.Destructive():
+	case res.Destructive() || len(targets) > 0:
 		fmt.Fprintf(w, "Anything else it changes in %s is caught by the project mirror too.\n", ui.HomeRel(root))
 	default:
 		fmt.Fprintf(w, "%s Oopsy does not know what %s does, so it relies on the project mirror of %s: whatever the command changes or deletes there is saved as it happens, and %s brings it back.\n",
