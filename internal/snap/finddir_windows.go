@@ -4,6 +4,7 @@ package snap
 
 import (
 	"path/filepath"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -74,4 +75,28 @@ func listDirFind(dir string) ([]dirEntry, error) {
 		}
 	}
 	return out, nil
+}
+
+// CompareListers walks root with both listers and reports their times and
+// entry counts, for measuring on Windows CI.
+func CompareListers(root string) (readDir, find time.Duration, a, b int) {
+	walk := func(f func(string) ([]dirEntry, error)) (int, time.Duration) {
+		start := time.Now()
+		n := 0
+		var rec func(string)
+		rec = func(d string) {
+			ents, _ := f(d)
+			for _, e := range ents {
+				n++
+				if e.kind == 'd' {
+					rec(filepath.Join(d, e.name))
+				}
+			}
+		}
+		rec(root)
+		return n, time.Since(start)
+	}
+	a, readDir = walk(listDir)
+	b, find = walk(listDirFind)
+	return
 }
