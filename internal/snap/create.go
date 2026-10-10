@@ -35,7 +35,7 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 		return nil, err
 	}
 
-	var paths []string
+	var paths, overwritten []string
 	gitOwned := map[string]string{}
 	seenProg := map[string]bool{}
 	for _, a := range actions {
@@ -50,10 +50,16 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 			s.Notes = append(s.Notes, a.Note)
 		}
 		paths = append(paths, a.Paths...)
+		if !a.Delete {
+			overwritten = append(overwritten, a.Paths...)
+		}
 		if a.Git != nil {
 			recs, gp, note := gitPrepare(a.Git)
 			s.Git = append(s.Git, recs...)
 			paths = append(paths, gp...)
+			if a.Git.Kind != "clean" {
+				overwritten = append(overwritten, gp...)
+			}
 			if a.Git.Kind == "reset-hard" || a.Git.Kind == "checkout-paths" {
 				for _, p := range gp {
 					gitOwned[filepath.Clean(p)] = a.Git.Repo
@@ -76,10 +82,12 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 			continue
 		}
 		e := Entry{Orig: p, Store: filepath.Join("files", fmt.Sprint(i)), GitRepo: gitOwned[p]}
-		switch {
-		case fi.Mode()&os.ModeSymlink != 0:
+		switch kindOf(fi) {
+		case kindSymlink:
 			e.Type = "symlink"
-		case fi.IsDir():
+		case kindJunction:
+			e.Type = "junction"
+		case kindDir:
 			e.Type = "dir"
 		default:
 			e.Type = "file"
@@ -87,36 +95,21 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 		if pfi, err := os.Stat(filepath.Dir(p)); err == nil {
 			e.ParentMtime = pfi.ModTime().UnixNano()
 		}
-		dst := filepath.Join(s.Dir(), e.Store)
-		skipped, err := cloneTree(p, dst)
-		if err == nil {
-			s.Skipped = append(s.Skipped, skipped...)
-			e.Method = cloneMethod
-			e.Size, e.Files, _ = treeSize(dst)
-		} else if errors.Is(err, errNoClone) {
-			size, n, _ := treeSize(p)
-			if size > budget {
-				s.Skipped = append(s.Skipped, Skip{Path: p, Reason: fmt.Sprintf(
-					"this filesystem has no copy on write clones and %s is over the copy limit of %s (raise copy_cap_bytes in %s)",
-					human(size), human(budget), ConfigPath())})
-				continue
+		deleteOnly := true
+		for _, q := range overwritten {
+			if overlaps(p, q) {
+				deleteOnly = false
+				break
 			}
-			skipped, err := copyTree(p, dst, cloneFile)
-			if err != nil {
-				s.Skipped = append(s.Skipped, Skip{Path: p, Reason: "copy failed: " + skipReason(err)})
-				_ = forceRemove(dst)
-				continue
-			}
-			s.Skipped = append(s.Skipped, skipped...)
-			budget -= size
-			e.Method, e.Size, e.Files = "copy", size, n
-		} else {
-			s.Skipped = append(s.Skipped, Skip{Path: p, Reason: err.Error()})
-			_ = forceRemove(dst)
+		}
+		skipped, err := s.saveEntry(&e, deleteOnly, &budget)
+		s.Skipped = append(s.Skipped, skipped...)
+		if err != nil {
 			continue
 		}
 		s.Entries = append(s.Entries, e)
 		s.Size += e.Size
+		s.Disk += e.Disk
 		s.Files += e.Files
 	}
 
@@ -134,14 +127,66 @@ func Create(command, cwd, source string, actions []classify.Action) (*Snapshot, 
 	return s, nil
 }
 
-// refuse returns a reason when a path is not something we should clone.
+// saveEntry saves e.Orig with the cheapest safe method: a copy on write
+// clone, then hard links when the command only deletes, then a plain copy
+// (NTFS compressed on Windows) within the copy budget.
+func (s *Snapshot) saveEntry(e *Entry, deleteOnly bool, budget *int64) ([]Skip, error) {
+	p := e.Orig
+	dst := s.EntryPath(*e)
+	skipped, err := cloneTree(p, dst)
+	if err == nil {
+		e.Method = cloneMethod
+		e.Size, e.Files, _ = treeSize(dst)
+		return skipped, nil
+	}
+	if !errors.Is(err, errNoClone) {
+		_ = forceRemove(dst)
+		return []Skip{{Path: p, Reason: skipReason(err)}}, err
+	}
+	if deleteOnly {
+		l, skipped, err := linkTree(p, dst)
+		if err == nil {
+			e.Method = "hardlink"
+			e.Size, e.Files, _ = treeSize(dst)
+			e.Disk = l.copied
+			if len(l.attrs) > 0 {
+				e.Attrs = l.attrs
+			}
+			return skipped, nil
+		}
+		_ = forceRemove(dst)
+		if !errors.Is(err, errNoClone) {
+			return append(skipped, Skip{Path: p, Reason: skipReason(err)}), err
+		}
+	}
+	size, n, _ := treeSize(p)
+	if size > *budget {
+		why := "this filesystem has no copy on write clones"
+		if deleteOnly {
+			why += " or hard links here"
+		}
+		err := fmt.Errorf("%s and %s is over the copy limit of %s (raise copy_cap_bytes in %s)",
+			why, human(size), human(*budget), ConfigPath())
+		return []Skip{{Path: p, Reason: err.Error()}}, err
+	}
+	skipped, err = copyTree(p, dst, cloneFile)
+	if err != nil {
+		_ = forceRemove(dst)
+		return []Skip{{Path: p, Reason: "copy failed: " + skipReason(err)}}, err
+	}
+	*budget -= size
+	e.Method, e.Size, e.Files, e.Disk = "copy", size, n, size
+	return skipped, nil
+}
+
+// refuse returns a reason when a path is not something we should save.
 func refuse(p string) string {
 	home, _ := os.UserHomeDir()
 	oops := Dir()
-	if p == oops || strings.HasPrefix(p, oops+"/") {
+	if within(p, oops) {
 		return "this is Oopsy's own storage"
 	}
-	if p == "/" || p == home || strings.HasPrefix(oops, p+"/") {
+	if filepath.Dir(p) == p || (home != "" && within(home, p)) || within(oops, p) {
 		return "too broad to snapshot (it contains the whole home directory or the snapshot store)"
 	}
 	return ""
@@ -149,22 +194,25 @@ func refuse(p string) string {
 
 // minimalPaths dedupes paths and drops any path inside another one.
 func minimalPaths(paths []string) []string {
-	clean := map[string]bool{}
+	clean := map[string]string{}
 	for _, p := range paths {
 		if p != "" {
-			clean[filepath.Clean(p)] = true
+			c := filepath.Clean(p)
+			if _, ok := clean[pathKey(c)]; !ok {
+				clean[pathKey(c)] = c
+			}
 		}
 	}
 	list := make([]string, 0, len(clean))
-	for p := range clean {
+	for _, p := range clean {
 		list = append(list, p)
 	}
-	sort.Strings(list)
+	sort.Slice(list, func(i, j int) bool { return pathKey(list[i]) < pathKey(list[j]) })
 	var out []string
 	for _, p := range list {
 		covered := false
 		for _, q := range out {
-			if q == "/" || strings.HasPrefix(p, q+"/") {
+			if within(p, q) {
 				covered = true
 				break
 			}

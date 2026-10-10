@@ -62,8 +62,9 @@ func treeSize(p string) (int64, int, error) {
 // files another program holds open without sharing. Those are recorded in
 // skipped instead of failing the whole snapshot.
 type treeCopy struct {
-	file    func(src, dst string, fi os.FileInfo) error
-	skipped []Skip
+	file         func(src, dst string, fi os.FileInfo) error
+	skipFileMeta bool // file sets metadata itself (hard links share it)
+	skipped      []Skip
 }
 
 // copyTree copies src to dst keeping modes, owners (when allowed), links and
@@ -121,7 +122,9 @@ func (c *treeCopy) walk(src, dst string, top bool) error {
 			c.skip(src, err)
 			return nil
 		}
-		setMeta(dst, fi, false)
+		if !c.skipFileMeta {
+			setMeta(dst, fi, false)
+		}
 	}
 	return nil
 }

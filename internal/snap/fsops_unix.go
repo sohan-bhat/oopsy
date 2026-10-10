@@ -90,3 +90,11 @@ func copyLink(src, dst string, fi os.FileInfo) error {
 // isLocked reports a file another program holds exclusively. Unix has no
 // mandatory locks that stop reading, so this never happens there.
 func isLocked(error) bool { return false }
+
+// readOnlyAttr and fragileAttrs only matter on Windows, where deleting a
+// read only file clears attributes on every hard link to it.
+const readOnlyAttr = 0
+
+func fragileAttrs(os.FileInfo) (uint32, bool) { return 0, false }
+
+func applyAttrs(string, uint32) {}

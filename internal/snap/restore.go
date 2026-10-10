@@ -71,7 +71,8 @@ func gitPlan(g GitRecord) string {
 func Restore(s *Snapshot) ([]Outcome, error) {
 	var out []Outcome
 	for _, e := range s.Entries {
-		src := filepath.Join(s.Dir(), e.Store)
+		pl := newPlacer(s, e)
+		src := pl.root
 		if _, err := os.Lstat(src); err != nil {
 			out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: "snapshot data is missing"})
 			continue
@@ -86,7 +87,7 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 			// git put the committed version here; it is still in git, so the
 			// saved uncommitted version can safely take its place.
 			if err := os.Remove(e.Orig); err == nil {
-				if err := place(src, e.Orig); err != nil {
+				if err := pl.place(src, e.Orig); err != nil {
 					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
 				} else {
 					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
@@ -94,7 +95,7 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 				continue
 			}
 		}
-		out = append(out, restorePath(src, e.Orig, s.ID)...)
+		out = append(out, pl.restorePath(src, e.Orig, s.ID)...)
 		if perr == nil && e.ParentMtime != 0 {
 			setMtime(parent, e.ParentMtime)
 		}
@@ -114,8 +115,9 @@ func RestoreTo(s *Snapshot, dir string) ([]Outcome, error) {
 	}
 	var out []Outcome
 	for _, e := range s.Entries {
-		rel := strings.TrimPrefix(e.Orig, "/")
-		if r, err := filepath.Rel(s.Cwd, e.Orig); err == nil && !strings.HasPrefix(r, "..") && r != "." {
+		orig := e.Orig[len(filepath.VolumeName(e.Orig)):]
+		rel := strings.TrimLeft(orig, `/\`)
+		if r, err := filepath.Rel(s.Cwd, e.Orig); err == nil && r != "." && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
 			rel = r
 		} else if r == "." {
 			rel = filepath.Base(e.Orig)
@@ -125,17 +127,29 @@ func RestoreTo(s *Snapshot, dir string) ([]Outcome, error) {
 			out = append(out, Outcome{Path: dst, Status: "failed", Detail: err.Error()})
 			continue
 		}
-		out = append(out, restorePath(filepath.Join(s.Dir(), e.Store), dst, s.ID)...)
+		pl := newPlacer(s, e)
+		out = append(out, pl.restorePath(pl.root, dst, s.ID)...)
 	}
 	return out, nil
 }
 
+// placer puts the files of one snapshot entry back.
+type placer struct {
+	root   string            // the entry's data in the store
+	linked bool              // saved with hard links, so it can be linked back
+	attrs  map[string]uint32 // attributes recorded for hard linked files
+}
+
+func newPlacer(s *Snapshot, e Entry) placer {
+	return placer{root: s.EntryPath(e), linked: e.Method == "hardlink", attrs: e.Attrs}
+}
+
 // restorePath puts src at dst. When dst exists, directories are merged and
 // differing files are kept side by side.
-func restorePath(src, dst string, id int) []Outcome {
+func (pl placer) restorePath(src, dst string, id int) []Outcome {
 	dfi, err := os.Lstat(dst)
 	if errors.Is(err, fs.ErrNotExist) {
-		if err := place(src, dst); err != nil {
+		if err := pl.place(src, dst); err != nil {
 			return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
 		}
 		return []Outcome{{Path: dst, Status: "restored"}}
@@ -147,14 +161,14 @@ func restorePath(src, dst string, id int) []Outcome {
 	if err != nil {
 		return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
 	}
-	if sfi.IsDir() && dfi.IsDir() {
+	if kindOf(sfi) == kindDir && kindOf(dfi) == kindDir {
 		ents, err := os.ReadDir(src)
 		if err != nil {
 			return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
 		}
 		var out []Outcome
 		for _, e := range ents {
-			out = append(out, restorePath(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), id)...)
+			out = append(out, pl.restorePath(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), id)...)
 		}
 		return out
 	}
@@ -162,16 +176,57 @@ func restorePath(src, dst string, id int) []Outcome {
 		return []Outcome{{Path: dst, Status: "same"}}
 	}
 	alt := altName(dst, id)
-	if err := place(src, alt); err != nil {
+	if err := pl.place(src, alt); err != nil {
 		return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
 	}
 	return []Outcome{{Path: dst, Status: "kept-both", Detail: alt}}
 }
 
+// place puts src at dst: hard links back for hard link snapshots on the
+// same volume, else a clone, else a copy.
+func (pl placer) place(src, dst string) error {
+	var skipped []Skip
+	var err error
+	if pl.linked && method != "copy" && sameDevice(src, filepath.Dir(dst)) {
+		l := &linker{root: pl.root, attrs: pl.attrs}
+		c := &treeCopy{file: l.file, skipFileMeta: true}
+		err = c.walk(src, dst, true)
+		skipped = c.skipped
+	} else {
+		skipped, err = cloneTree(src, dst)
+		if errors.Is(err, errNoClone) {
+			skipped, err = copyTree(src, dst, cloneFile)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	pl.fixAttrs(src, dst)
+	return skipError(skipped)
+}
+
+// fixAttrs reapplies recorded attributes to everything placed from src.
+func (pl placer) fixAttrs(src, dst string) {
+	if len(pl.attrs) == 0 {
+		return
+	}
+	base := relKey(pl.root, src)
+	for rel, a := range pl.attrs {
+		switch {
+		case rel == base:
+			applyAttrs(dst, a)
+		case base == ".":
+			applyAttrs(filepath.Join(dst, filepath.FromSlash(rel)), a)
+		case strings.HasPrefix(rel, base+"/"):
+			applyAttrs(filepath.Join(dst, filepath.FromSlash(rel[len(base)+1:])), a)
+		}
+	}
+}
+
 func altName(dst string, id int) string {
 	ext := filepath.Ext(dst)
 	base := strings.TrimSuffix(dst, ext)
-	if ext == "" || strings.Contains(ext, "/") {
+	if ext == "" || strings.ContainsAny(ext, `/\`) {
 		base, ext = dst, ""
 	}
 	alt := fmt.Sprintf("%s.oops-%d%s", base, id, ext)
@@ -181,18 +236,6 @@ func altName(dst string, id int) string {
 		}
 		alt = fmt.Sprintf("%s.oops-%d-%d%s", base, id, i, ext)
 	}
-}
-
-// place clones src to dst, falling back to a copy.
-func place(src, dst string) error {
-	skipped, err := cloneTree(src, dst)
-	if errors.Is(err, errNoClone) {
-		skipped, err = copyTree(src, dst, cloneFile)
-	}
-	if err != nil {
-		return err
-	}
-	return skipError(skipped)
 }
 
 func sameContent(a, b string, afi, bfi os.FileInfo) bool {

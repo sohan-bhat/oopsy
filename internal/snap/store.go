@@ -81,9 +81,25 @@ type Entry struct {
 	Type        string `json:"type"` // file, dir, symlink
 	Size        int64  `json:"size"`
 	Files       int    `json:"files"`
-	Method      string `json:"method"` // clone, reflink, copy
+	Method      string `json:"method"` // clone, reflink, block clone, hardlink, copy
 	ParentMtime int64  `json:"parent_mtime,omitempty"`
 	GitRepo     string `json:"git_repo,omitempty"` // set when git would have overwritten a tracked file
+	// Disk is the extra disk the snapshot took when it was made: zero for
+	// clones and hard links, which share the original's data.
+	Disk int64 `json:"disk"`
+	// Attrs holds Windows attributes of hard linked files that a delete may
+	// clear (read only, hidden, system), keyed by path relative to Orig.
+	Attrs map[string]uint32 `json:"attrs,omitempty"`
+	// Base is set when the data lives in a store on another volume.
+	Base string `json:"base,omitempty"`
+}
+
+// EntryPath is where entry e's saved data lives.
+func (s *Snapshot) EntryPath(e Entry) string {
+	if e.Base != "" {
+		return filepath.Join(e.Base, e.Store)
+	}
+	return filepath.Join(s.Dir(), e.Store)
 }
 
 // GitRecord is git state saved before a git command.
@@ -116,6 +132,7 @@ type Snapshot struct {
 	Skipped  []Skip      `json:"skipped,omitempty"`
 	Notes    []string    `json:"notes,omitempty"`
 	Size     int64       `json:"size"`
+	Disk     int64       `json:"disk"`
 	Files    int         `json:"files"`
 	Broad    bool        `json:"broad,omitempty"`
 	Millis   float64     `json:"millis"`

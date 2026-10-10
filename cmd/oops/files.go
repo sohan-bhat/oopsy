@@ -273,9 +273,9 @@ func showCmd() *cobra.Command {
 			}
 			fmt.Println()
 			for _, e := range s.Entries {
-				fmt.Printf("%s %s  %s\n", ui.Bold(ui.HomeRel(e.Orig)), ui.Dim(e.Type), ui.Dim(e.Method+", "+ui.Bytes(e.Size)))
+				fmt.Printf("%s %s  %s\n", ui.Bold(ui.HomeRel(e.Orig)), ui.Dim(e.Type), ui.Dim(entryStorage(e)))
 				if e.Type == "dir" {
-					printTree(filepath.Join(s.Dir(), e.Store), 25)
+					printTree(s.EntryPath(e), 25)
 				}
 			}
 			for _, g := range s.Git {
@@ -290,6 +290,19 @@ func showCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// entryStorage says how an entry was saved and what it costs on disk.
+func entryStorage(e snap.Entry) string {
+	disk := e.Disk
+	if e.Method == "copy" && disk == 0 {
+		disk = e.Size // snapshots from before disk was recorded
+	}
+	extra := ui.Bytes(disk) + " extra on disk"
+	if disk == 0 {
+		extra = "shares the original's data, no extra disk"
+	}
+	return fmt.Sprintf("%s, %s, %s", e.Method, ui.Bytes(e.Size), extra)
 }
 
 func describeGit(g snap.GitRecord) string {
@@ -356,7 +369,7 @@ func diffCmd() *cobra.Command {
 			var missing, changed, added, same int
 			budget := 400
 			for _, e := range s.Entries {
-				root := filepath.Join(s.Dir(), e.Store)
+				root := s.EntryPath(e)
 				_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 					if err != nil {
 						return nil
