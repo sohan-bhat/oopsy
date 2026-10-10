@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: SohanBhat.Oopsy
+PackageVersion: 0.2.1
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: oops.exe
+    PortableCommandAlias: oops
+  - RelativeFilePath: oops-db.exe
+    PortableCommandAlias: oops-db
+ReleaseDate: 2026-10-10
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/sohan-bhat/oopsy/releases/download/v0.2.1/oopsy_0.2.1_windows_amd64.zip
+    InstallerSha256: 6FCBC04A8E4D9E9776B1936F0E66540EE52912500895F3798B177A7CF8B5E96E
+  - Architecture: arm64
+    InstallerUrl: https://github.com/sohan-bhat/oopsy/releases/download/v0.2.1/oopsy_0.2.1_windows_arm64.zip
+    InstallerSha256: 26E53230F1DC126867389C38171FF3AB0D1452361A4E45C3B9435C3F236AA325
+ManifestType: installer
+ManifestVersion: 1.6.0
