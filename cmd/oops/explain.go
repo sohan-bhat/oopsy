@@ -27,7 +27,7 @@ func explainLine(w io.Writer, line, cwd string) {
 		return
 	}
 	if why := deletesNothing(line); why != "" {
-		fmt.Fprintf(w, "%s %s\n", ui.Good("Nothing to save."), why)
+		fmt.Fprintf(w, "%s %s\n", ui.Good("Harmless."), why)
 		return
 	}
 	res := classify.Classify(line, cwd, os.Environ())
@@ -44,6 +44,9 @@ func explainLine(w io.Writer, line, cwd string) {
 			}
 		}
 		for _, p := range lazy {
+			if namedBy(res.Actions, p) {
+				continue
+			}
 			fmt.Fprintf(w, "  %s, whole, since the command or its script names it (rebuildable, kept one day)\n", ui.HomeRel(p))
 		}
 	}
@@ -57,6 +60,18 @@ func explainLine(w io.Writer, line, cwd string) {
 		fmt.Fprintf(w, "%s Oopsy does not know what %s does, so it relies on the project mirror of %s: whatever the command changes or deletes there is saved as it happens, and %s brings it back.\n",
 			ui.Warn("Unknown command."), ui.Bold(firstWord(line)), ui.HomeRel(root), ui.Bold("oops"))
 	}
+}
+
+// namedBy reports a path the classifier already saves.
+func namedBy(actions []classify.Action, p string) bool {
+	for _, a := range actions {
+		for _, q := range a.Paths {
+			if q == p {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func firstWord(line string) string {

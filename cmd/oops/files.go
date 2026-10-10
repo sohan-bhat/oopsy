@@ -8,15 +8,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/sohan-bhat/oopsy/internal/classify"
-	"github.com/sohan-bhat/oopsy/internal/remote"
+	"github.com/sohan-bhat/oopsy/internal/cli"
 	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
 )
@@ -52,15 +50,37 @@ func ago(t time.Time) string {
 
 func parseID(arg string) (int, error) {
 	id, err := strconv.Atoi(strings.TrimPrefix(arg, "#"))
-	if err != nil {
-		return 0, fmt.Errorf("%q is not a snapshot id (see oops list)", arg)
+	if err != nil || id <= 0 {
+		return 0, cli.UsageErr("%q is not a snapshot id. oops list shows them; then run for example: oops undo 12", arg)
 	}
 	return id, nil
 }
 
+// loadSnapshot loads a snapshot, explaining a missing one.
+func loadSnapshot(id int) (*snap.Snapshot, error) {
+	s, err := snap.Load(id)
+	if err != nil {
+		if _, statErr := os.Stat(snap.SnapDir(id)); os.IsNotExist(statErr) {
+			return nil, cli.NotFound("there is no snapshot %d. oops list shows the ones you have (they are kept %d days)", id, snap.LoadConfig().KeepDays)
+		}
+		return nil, fmt.Errorf("snapshot %d could not be read: %s. Its folder is %s", id, ui.Explain(err), ui.HomeRel(snap.SnapDir(id)))
+	}
+	return s, nil
+}
+
 // finishPending completes snapshots of commands that ran without a hook
 // after them, so what oops shows is up to date.
-func finishPending() { snap.FinishPending("") }
+func finishPending() {
+	warnConfig()
+	snap.FinishPending("")
+}
+
+// warnConfig says once when the settings file cannot be read.
+func warnConfig() {
+	if p := snap.ConfigProblem(); p != "" {
+		fmt.Fprintf(os.Stderr, "%s %s\n", ui.ErrWarn("oops:"), p)
+	}
+}
 
 func undoLatest(yes bool) error {
 	finishPending()
@@ -138,7 +158,7 @@ func confirmAndRestore(s *snap.Snapshot, yes bool) error {
 		}
 	}
 	if failed > 0 {
-		return fmt.Errorf("%s could not be restored", ui.Plural(failed, "path"))
+		return cli.Partial("%s could not be restored; the lines above say why. Everything else is back", ui.Plural(failed, "path"))
 	}
 	fmt.Println(ui.Good(fmt.Sprintf("Restored snapshot %d.", s.ID)))
 	return nil
@@ -172,6 +192,15 @@ func printOutcomes(outcomes []snap.Outcome) {
 	if same > 0 {
 		fmt.Printf("  %s\n", ui.Dim(ui.Plural(same, "file")+" already matched and were left alone"))
 	}
+	kept := 0
+	for _, o := range outcomes {
+		if o.Status == "kept-both" {
+			kept++
+		}
+	}
+	if kept > 0 {
+		fmt.Printf("  %s\n", ui.Dim(fmt.Sprintf("%s existed again with different content, so nothing was overwritten: each saved copy sits next to it with .oops and the snapshot id in its name. Compare them, keep what you want, and delete the other.", ui.Plural(kept, "path"))))
+	}
 }
 
 func undoCmd() *cobra.Command {
@@ -186,7 +215,7 @@ func undoCmd() *cobra.Command {
 				return err
 			}
 			finishPending()
-			s, err := snap.Load(id)
+			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
 			}
@@ -300,7 +329,7 @@ func showCmd() *cobra.Command {
 				return err
 			}
 			finishPending()
-			s, err := snap.Load(id)
+			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
 			}
@@ -402,7 +431,7 @@ func diffCmd() *cobra.Command {
 				return err
 			}
 			finishPending()
-			s, err := snap.Load(id)
+			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
 			}
@@ -546,14 +575,14 @@ func restoreCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if to == "" {
-				return fmt.Errorf("--to <dir> is required (use oops undo %s to restore in place)", args[0])
+				return cli.UsageErr("oops restore copies a snapshot into another folder, so it needs --to. Try: oops restore %s --to ~/recovered (or oops undo %s to restore in place)", args[0], args[0])
 			}
 			id, err := parseID(args[0])
 			if err != nil {
 				return err
 			}
 			finishPending()
-			s, err := snap.Load(id)
+			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
 			}
@@ -601,51 +630,15 @@ func explainCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "explain <command>",
 		Short: "Show what Oopsy would save for a command, without running it",
-		Args:  cobra.MinimumNArgs(1),
+		Example: `  oops explain rm -rf build
+  oops explain git reset --hard
+  oops explain make clean`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			line := strings.Join(args, " ")
 			if cwd == "" {
 				cwd, _ = os.Getwd()
 			}
-			res := classify.Classify(line, cwd, os.Environ())
-			targets := remote.Targets(line, cwd, os.Environ())
-			if !res.Destructive() && len(targets) == 0 {
-				fmt.Println(ui.Good("Not destructive.") + " Oopsy would let it run without a snapshot.")
-				return nil
-			}
-			fmt.Println(ui.Warn("Destructive.") + " Oopsy would save this first:")
-			for _, t := range targets {
-				fmt.Printf("  %s %s\n", ui.Accent(t.Tool), t.Describe)
-			}
-			for _, a := range res.Actions {
-				label := a.Program
-				if a.Broad {
-					label += " (broad)"
-				}
-				switch {
-				case a.Git != nil:
-					fmt.Printf("  %s %s in %s", ui.Accent(label), a.Git.Kind, ui.HomeRel(a.Git.Repo))
-					if len(a.Git.Paths) > 0 {
-						fmt.Printf(" paths %s", strings.Join(a.Git.Paths, " "))
-					}
-					if len(a.Git.Branches) > 0 {
-						fmt.Printf(" branches %s", strings.Join(a.Git.Branches, " "))
-					}
-					fmt.Println()
-				case len(a.Paths) > 0:
-					sort.Strings(a.Paths)
-					for i, p := range a.Paths {
-						if i == 20 {
-							fmt.Printf("  %s\n", ui.Dim(fmt.Sprintf("and %d more", len(a.Paths)-20)))
-							break
-						}
-						fmt.Printf("  %s %s\n", ui.Accent(label), ui.HomeRel(p))
-					}
-				}
-				if a.Note != "" {
-					fmt.Printf("    %s\n", ui.Dim(a.Note))
-				}
-			}
+			explainLine(os.Stdout, strings.Join(args, " "), cwd)
 			return nil
 		},
 	}
@@ -660,6 +653,7 @@ func configCmd() *cobra.Command {
 		Short: "Show or change settings (keep_days, max_gb, free_floor_gb, quiet, store)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			warnConfig()
 			cfg := snap.LoadConfig()
 			if len(args) == 0 {
 				fmt.Printf("keep_days    %d\n", cfg.KeepDays)
@@ -680,19 +674,19 @@ func configCmd() *cobra.Command {
 				return nil
 			}
 			if len(args) != 2 {
-				return fmt.Errorf("usage: oops config <key> <value>")
+				return cli.UsageErr("oops config %s needs a value too. Try: oops config keep_days 14, or oops config with nothing to see every setting", args[0])
 			}
 			v := args[1]
 			f, ferr := strconv.ParseFloat(v, 64)
 			switch args[0] {
 			case "keep_days":
 				if ferr != nil || f < 1 {
-					return fmt.Errorf("keep_days must be a number of days")
+					return cli.UsageErr("keep_days must be a number of days, for example: oops config keep_days 14")
 				}
 				cfg.KeepDays = int(f)
 			case "max_gb":
 				if ferr != nil || f <= 0 {
-					return fmt.Errorf("max_gb must be a positive number")
+					return cli.UsageErr("max_gb must be a positive number, for example: oops config max_gb 10")
 				}
 				cfg.MaxBytes = int64(f * (1 << 30))
 			case "free_floor_gb":
@@ -701,14 +695,14 @@ func configCmd() *cobra.Command {
 					break
 				}
 				if ferr != nil || f <= 0 {
-					return fmt.Errorf("free_floor_gb must be a positive number or auto")
+					return cli.UsageErr("free_floor_gb must be a positive number or auto, for example: oops config free_floor_gb 4")
 				}
 				cfg.FreeFloorBytes = int64(f * (1 << 30))
 			case "quiet":
 				cfg.Quiet = v == "true" || v == "1" || v == "yes"
 			case "watch_max_file_mb":
 				if ferr != nil || f < 1 {
-					return fmt.Errorf("watch_max_file_mb must be a number of megabytes, 1 or more")
+					return cli.UsageErr("watch_max_file_mb must be a number of megabytes, 1 or more, for example: oops config watch_max_file_mb 100")
 				}
 				cfg.WatchMaxFileMB = int(f)
 			case "store":
@@ -726,7 +720,7 @@ func configCmd() *cobra.Command {
 				cfg.Store = dir
 				fmt.Println(ui.Dim("Snapshots, mirrors and objects now go to " + ui.HomeRel(dir) + ". Clones and hard links cannot cross drives, so each project costs one full compressed copy there, plus the changes. That is what keeps them safe if this disk dies."))
 			default:
-				return fmt.Errorf("unknown setting %q", args[0])
+				return cli.UsageErr("%q is not a setting. The settings are keep_days, max_gb, free_floor_gb, quiet, store and watch_max_file_mb; oops config shows them all", args[0])
 			}
 			if err := snap.SaveConfig(cfg); err != nil {
 				return err
