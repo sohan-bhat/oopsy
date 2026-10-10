@@ -295,7 +295,9 @@ func (ps *psState) command(toks []psTok, input *psInput, piped bool) *psInput {
 			args = append(args, t)
 		}
 	}
-	_ = redirs
+	for _, r := range redirs {
+		ps.redirect(r)
+	}
 	if len(args) == 0 {
 		return nil
 	}
@@ -322,6 +324,7 @@ func (ps *psState) command(toks []psTok, input *psInput, piped bool) *psInput {
 	default:
 		return nil
 	}
+	ps.scanDotNet(toks)
 	name := psName(head.val)
 	rest := args[1:]
 	switch name {
@@ -332,6 +335,53 @@ func (ps *psState) command(toks []psTok, input *psInput, piped bool) *psInput {
 			return nil
 		}
 		ps.pathAction("Remove-Item", a.values("path", 0), a.named["literalpath"], input, true, "", a.unknown)
+	case "move-item", "copy-item":
+		sp := specMove
+		if name == "copy-item" {
+			sp = specCopy
+		}
+		a := bind(sp, rest, ps.evalPath)
+		ps.subexprs(a)
+		if a.has("whatif") || (name == "move-item" && !a.has("force")) {
+			return nil
+		}
+		ps.copyMove(name, a, input)
+	case "set-content", "clear-content":
+		sp := specContent
+		if name == "clear-content" {
+			sp = specClear
+		}
+		a := bind(sp, rest, ps.evalPath)
+		ps.subexprs(a)
+		if a.has("whatif") {
+			return nil
+		}
+		label := map[string]string{"set-content": "Set-Content", "clear-content": "Clear-Content"}[name]
+		ps.pathAction(label, a.values("path", 0), a.named["literalpath"], input, false, "overwrites files", a.unknown)
+	case "out-file", "tee-object":
+		sp := specOutFile
+		if name == "tee-object" {
+			sp = specTee
+		}
+		a := bind(sp, rest, ps.evalPath)
+		if a.has("append") || a.has("noclobber") || a.has("whatif") {
+			return input
+		}
+		ps.pathAction(map[string]string{"out-file": "Out-File", "tee-object": "Tee-Object"}[name], a.values("filepath", 0), a.named["literalpath"], nil, false, "overwrites files", a.unknown)
+		if name == "tee-object" {
+			return input
+		}
+	case "new-item":
+		a := bind(specNewItem, rest, ps.evalPath)
+		if a.has("force") && !a.has("whatif") {
+			paths := a.values("path", 0)
+			if n := a.named["name"]; len(n) > 0 && len(paths) > 0 {
+				paths = []psValue{{s: paths[0].s + string(filepath.Separator) + n[0].s, ok: paths[0].ok && n[0].ok, literal: true}}
+			} else if len(n) > 0 {
+				paths = n
+			}
+			ps.pathAction("New-Item", nil, paths, nil, false, "replaces existing files", false)
+		}
 	case "set-location", "push-location":
 		a := bind(specLoc, rest, ps.evalPath)
 		vals := a.values("path", 0)
