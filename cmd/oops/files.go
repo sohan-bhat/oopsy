@@ -631,7 +631,8 @@ func explainCmd() *cobra.Command {
 		Use:   "explain <command>",
 		Short: "Show what Oopsy would save for a command, without running it",
 		Example: `  oops explain rm -rf build
-  oops explain git reset --hard`,
+  oops explain git reset --hard
+  oops explain make clean`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cwd == "" {

@@ -25,7 +25,7 @@ func WatchRoots() []string {
 			out = append(out, mm.Root)
 		}
 	}
-	add(filepath.Join(Dir(), "mirrors"))
+	add(filepath.Join(StoreDir(), "mirrors"))
 	for _, vr := range volumeRoots() {
 		if base := volumeBase(vr); base != "" {
 			add(filepath.Join(base, "mirrors"))

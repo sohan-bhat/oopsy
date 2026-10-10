@@ -78,11 +78,11 @@ func ConfigPath() string { return filepath.Join(Dir(), "config.json") }
 func LoadConfig() Config {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
-	path := ConfigPath()
+	path := ConfigPath() + "\x00" + os.Getenv("OOPS_FREE_FLOOR_BYTES")
 	if cfgCache != nil && cfgPath == path && time.Since(cfgAt) < time.Second {
 		return *cfgCache
 	}
-	cfg := loadConfig(path)
+	cfg := loadConfig(ConfigPath())
 	cfgCache, cfgPath, cfgAt = &cfg, path, time.Now()
 	return cfg
 }

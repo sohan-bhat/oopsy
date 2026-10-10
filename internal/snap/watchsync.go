@@ -63,7 +63,7 @@ func WatchIgnored(root, p string) bool {
 			return true
 		}
 	}
-	return rebuildableNames[parts[len(parts)-1]] || within(p, Dir()) || within(p, Dir())
+	return rebuildableNames[parts[len(parts)-1]] || within(p, Dir()) || within(p, StoreDir())
 }
 
 // WatchResult reports one watch sync.
