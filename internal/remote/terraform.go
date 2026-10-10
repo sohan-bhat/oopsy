@@ -201,6 +201,11 @@ func restoreTF(s *snap.Snapshot, r snap.Record) snap.Outcome {
 				cur.Lineage, st.Lineage, st.Tool.Name, st.Tool.Cwd, saved))
 		}
 	}
+	if cur.Lineage == old.Lineage && cur.Serial == old.Serial {
+		// Already put back, as when the state is a local file that the
+		// snapshot's files brought back first.
+		return snap.Outcome{Path: r.Label, Status: "record", Detail: tfDetail(st, old, cur, 0)}
+	}
 	serial := old.Serial
 	if cur.Serial >= serial {
 		serial = cur.Serial + 1
@@ -236,6 +241,10 @@ func tfDetail(st tfState, old, cur stateFile, serial int64) string {
 		}
 	}
 	msg := fmt.Sprintf("put back the saved state (%s) as serial %d", plural(len(old.addresses()), "resource"), serial)
+	known := serial != 0
+	if !known {
+		msg = fmt.Sprintf("the state already matches the saved one (%s), since the state file came back with the files", plural(len(old.addresses()), "resource"))
+	}
 	switch st.Mode {
 	case "destroy":
 		msg += ". Only the state is back: the destroyed resources are still gone, so run terraform plan to see them and terraform apply to create them again"
@@ -245,8 +254,11 @@ func tfDetail(st tfState, old, cur stateFile, serial int64) string {
 		msg += ". Data inside them, such as database rows, bucket objects and disk contents, was not saved and will not come back"
 	case "apply":
 		msg += ". Changes the apply made to real resources are not undone: run terraform plan to see them and terraform apply to revert them"
-		if len(untracked) > 0 {
+		switch {
+		case len(untracked) > 0:
 			msg += ". Resources the apply created still exist but are no longer tracked, so remove them by hand or import them: " + listSome(untracked, 4)
+		case !known:
+			msg += ". Any resources the apply created still exist but are no longer tracked, and terraform plan will not show them, so check the apply's output for them"
 		}
 		msg += ". Data inside resources was not saved"
 	default:
