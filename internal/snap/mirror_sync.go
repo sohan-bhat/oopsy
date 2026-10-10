@@ -267,9 +267,6 @@ func (m *Mirror) attribute(p *Pending, old, removed, changed []node, res *SyncRe
 			inside := under(old, n.rel)
 			for _, c := range inside {
 				e.Files++
-				if c.kind == 'f' {
-					e.Size += c.size
-				}
 				rel := c.rel[len(n.rel)+1:]
 				switch {
 				case c.kind == 'd':
@@ -296,12 +293,13 @@ func (m *Mirror) attribute(p *Pending, old, removed, changed []node, res *SyncRe
 			e.Files = 1
 		default:
 			e.Type = "file"
-			e.Size, e.Files = n.size, 1
+			e.Files = 1
 			if m.Method == "hardlink" && fragileMode(n.mode) {
 				e.Attrs = map[string]uint32{".": n.mode}
 			}
 		}
 		e.ParentMtime = parentMtime(old, n.rel, m.Root)
+		e.Size, _, _ = treeSize(target) // what the saved data takes on disk
 		s.Entries = append(s.Entries, e)
 		s.Size += e.Size
 		s.Files += e.Files
