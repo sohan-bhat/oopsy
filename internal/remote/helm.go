@@ -226,15 +226,25 @@ func captureHelm(dir string, t tool, h helmSpec, kind, rel string) (*snap.Record
 	if ns == "" {
 		ns = nsOf(items[0])
 	}
+	// The live resources, with Helm's labels and field owners, so they come
+	// back exactly as Helm left them. The manifest is the fallback.
+	if strings.TrimSpace(latest.Manifest) != "" {
+		out, err := t.run(captureTimeout, strings.NewReader(latest.Manifest), nil, "get", "--namespace="+ns, "--filename=-", "--output=json", "--ignore-not-found")
+		if live, perr := parseItems(out); err == nil && perr == nil && len(live) > 0 {
+			b, _ := json.MarshalIndent(map[string]any{"apiVersion": "v1", "kind": "List", "items": live}, "", " ")
+			_ = writeFile(dir, "resources.json", b)
+		}
+	}
 	chart := latest.Chart.Metadata.Name + " " + latest.Chart.Metadata.Version
 	st := helmState{Tool: t, Release: rel, Namespace: ns, Revision: latest.Version, Chart: chart}
 	label := fmt.Sprintf("helm release %s in %s (chart %s, revision %d, %s)", rel, ns, chart, latest.Version, plural(len(items), "stored revision"))
-	return &snap.Record{Kind: "helm", Label: label, Meta: meta(st), Size: int64(len(data) + len(latest.Manifest))}, nil
+	return &snap.Record{Kind: "helm", Label: label, Meta: meta(st)}, nil
 }
 
 // restoreHelm puts the release's stored history back, so helm list and
-// helm upgrade see it again, and recreates the resources from the manifest
-// of the last revision. Resources made by chart hooks and data inside
+// helm upgrade see it again, and recreates the resources as they were
+// when the uninstall ran (from the manifest of the last revision when the
+// live copies could not be read). Resources made by chart hooks and data inside
 // volumes are not part of the manifest and do not come back.
 func restoreHelm(s *snap.Snapshot, r snap.Record) snap.Outcome {
 	fail := func(msg string) snap.Outcome { return snap.Outcome{Path: r.Label, Status: "failed", Detail: msg} }
@@ -251,7 +261,11 @@ func restoreHelm(s *snap.Snapshot, r snap.Record) snap.Outcome {
 	var parts []string
 	var errs []string
 	manifest := filepath.Join(dir, "manifest.yaml")
-	if b, _ := os.ReadFile(manifest); len(bytes.TrimSpace(b)) > 0 {
+	if live, err := readItems(filepath.Join(dir, "resources.json")); err == nil {
+		res := putBack(t, dir, live, false, true)
+		errs = append(errs, res.errors...)
+		parts = append(parts, res.summary("recreated"))
+	} else if b, _ := os.ReadFile(manifest); len(bytes.TrimSpace(b)) > 0 {
 		out, err := t.run(restoreTimeout, nil, nil, "create", "--namespace="+st.Namespace, "--filename="+manifest)
 		created := strings.Count(string(out), " created")
 		other := otherErrors(err)
@@ -267,7 +281,7 @@ func restoreHelm(s *snap.Snapshot, r snap.Record) snap.Outcome {
 		_, _ = t.run(restoreTimeout, nil, nil, "annotate", "--namespace="+st.Namespace, "--filename="+manifest, "--overwrite",
 			"meta.helm.sh/release-name="+st.Release, "meta.helm.sh/release-namespace="+st.Namespace)
 	}
-	rep := putBack(t, dir, items, true)
+	rep := putBack(t, dir, items, true, false)
 	errs = append(errs, rep.errors...)
 	if len(rep.errors) == 0 {
 		parts = append([]string{fmt.Sprintf("release %s is back in helm list at revision %d", st.Release, st.Revision)}, parts...)
