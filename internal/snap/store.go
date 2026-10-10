@@ -98,7 +98,9 @@ func loadConfig(path string) Config {
 	cfg := DefaultConfig
 	b, err := os.ReadFile(path)
 	if err == nil {
-		_ = json.Unmarshal(b, &cfg)
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			cfg = DefaultConfig
+		}
 	}
 	// Tests run on disks of any fullness; they set the floor explicitly.
 	if v, err := strconv.ParseInt(os.Getenv("OOPS_FREE_FLOOR_BYTES"), 10, 64); err == nil && v > 0 {
@@ -111,6 +113,23 @@ func loadConfig(path string) Config {
 		cfg.MaxBytes = DefaultConfig.MaxBytes
 	}
 	return cfg
+}
+
+// ConfigProblem explains a settings file Oopsy cannot read, or returns ""
+// when it is fine or missing. Oopsy then runs with the defaults.
+func ConfigProblem() string {
+	b, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		return fmt.Sprintf("%s could not be read (%v), so Oopsy is using its default settings", ConfigPath(), err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return fmt.Sprintf("%s is not valid JSON (%v), so Oopsy is using its default settings. Fix it, or delete it and set things again with oops config", ConfigPath(), err)
+	}
+	return ""
 }
 
 // SaveConfig writes settings.

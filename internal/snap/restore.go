@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sohan-bhat/oopsy/internal/ui"
 )
 
 // Outcome is one line of a restore report.
@@ -83,7 +85,7 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 		parent := filepath.Dir(e.Orig)
 		_, perr := os.Stat(parent)
 		if err := os.MkdirAll(parent, 0o755); err != nil {
-			out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
+			out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: ui.Explain(err)})
 			continue
 		}
 		if e.After != nil && stampMatches(e.Orig, e.After) {
@@ -92,7 +94,7 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 			// kept inside the snapshot, never thrown away.
 			if err := s.setAside(e.Orig); err == nil {
 				if err := pl.place(src, e.Orig); err != nil {
-					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
+					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: ui.Explain(err)})
 				} else {
 					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
 				}
@@ -107,7 +109,7 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 			// saved uncommitted version can safely take its place.
 			if err := os.Remove(e.Orig); err == nil {
 				if err := pl.place(src, e.Orig); err != nil {
-					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
+					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: ui.Explain(err)})
 				} else {
 					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
 				}
@@ -146,7 +148,7 @@ func RestoreTo(s *Snapshot, dir string) ([]Outcome, error) {
 		}
 		dst := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			out = append(out, Outcome{Path: dst, Status: "failed", Detail: err.Error()})
+			out = append(out, Outcome{Path: dst, Status: "failed", Detail: ui.Explain(err)})
 			continue
 		}
 		pl := newPlacer(s, e)
@@ -176,21 +178,21 @@ func (pl placer) restorePath(src, dst string, id int) []Outcome {
 	dfi, err := os.Lstat(dst)
 	if errors.Is(err, fs.ErrNotExist) {
 		if err := pl.place(src, dst); err != nil {
-			return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
+			return []Outcome{{Path: dst, Status: "failed", Detail: ui.Explain(err)}}
 		}
 		return []Outcome{{Path: dst, Status: "restored"}}
 	}
 	if err != nil {
-		return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
+		return []Outcome{{Path: dst, Status: "failed", Detail: ui.Explain(err)}}
 	}
 	sfi, err := os.Lstat(src)
 	if err != nil {
-		return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
+		return []Outcome{{Path: dst, Status: "failed", Detail: ui.Explain(err)}}
 	}
 	if kindOf(sfi) == kindDir && kindOf(dfi) == kindDir {
 		ents, err := os.ReadDir(src)
 		if err != nil {
-			return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
+			return []Outcome{{Path: dst, Status: "failed", Detail: ui.Explain(err)}}
 		}
 		var out []Outcome
 		for _, e := range ents {
@@ -203,7 +205,7 @@ func (pl placer) restorePath(src, dst string, id int) []Outcome {
 	}
 	alt := altName(dst, id)
 	if err := pl.place(src, alt); err != nil {
-		return []Outcome{{Path: dst, Status: "failed", Detail: err.Error()}}
+		return []Outcome{{Path: dst, Status: "failed", Detail: ui.Explain(err)}}
 	}
 	return []Outcome{{Path: dst, Status: "kept-both", Detail: alt}}
 }
