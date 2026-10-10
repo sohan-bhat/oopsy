@@ -186,6 +186,15 @@ button { font: inherit; color: inherit; }
 @media (max-width: 480px) {
   .install__cmd { font-size: 13.5px; }
   .install__copy { min-width: 76px; padding: 0 14px; }
+  .install__tab { padding: 7px 10px 6px; font-size: 13.5px; }
+}
+@media (max-width: 400px) {
+  /* Room for the PS> prompt next to the longest unbreakable URL piece. */
+  .install__cmd { font-size: 13px; gap: 8px; padding: 17px 12px; }
+  .install__copy { min-width: 64px; padding: 0 10px; }
+}
+@media (max-width: 370px) {
+  .install__cmd { font-size: 12px; }
 }
 .install__copy:hover { background: #ffd24d; }
 .install__copy:active { background: #eab619; }

@@ -15,6 +15,7 @@
   const copyBtn = $("#install-copy");
   const copyLabel = copyBtn.querySelector(".install__copy-label");
   const copyStatus = $("#copy-status");
+  const prompt = document.querySelector(".install__dollar");
 
   function selectTab(tab, focus) {
     tabs.forEach((t) => {
@@ -23,6 +24,7 @@
       t.tabIndex = on ? 0 : -1;
     });
     renderCmd(tab.dataset.cmd);
+    prompt.textContent = tab.dataset.prompt || "$";
     panel.setAttribute("aria-labelledby", tab.id);
     resetCopy();
     if (focus) tab.focus();
@@ -41,8 +43,9 @@
   // Wrap only between words, so a narrow screen never splits sohan-bhat at its hyphen.
   function renderCmd(cmd) {
     installText.textContent = "";
-    cmd.split(" ").forEach((word, i) => {
-      if (i) installText.appendChild(document.createTextNode(" "));
+    cmd.split(" ").forEach((word, i, words) => {
+      // A second command (after ";") starts on its own line.
+      if (i) installText.appendChild(words[i - 1].endsWith(";") ? document.createElement("br") : document.createTextNode(" "));
       const span = document.createElement("span");
       span.className = word.includes("://") ? "w w--url" : "w";
       // URLs may only break right after a slash, never inside a word
@@ -56,7 +59,11 @@
       installText.appendChild(span);
     });
   }
-  renderCmd(tabs[0].dataset.cmd);
+  // Windows visitors start on Scoop; everyone else on Homebrew.
+  const isWindows = /Windows/i.test(navigator.userAgent);
+  const firstTab = (isWindows && tabs.find((t) => t.id === "tab-scoop")) || tabs[0];
+  if (firstTab !== tabs[0]) selectTab(firstTab);
+  else renderCmd(tabs[0].dataset.cmd);
 
   let copyTimer;
   function resetCopy() {
