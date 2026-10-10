@@ -133,43 +133,99 @@ func putBack(t tool, dir string, items []map[string]any, replace bool) report {
 			rep.leftAlone = append(rep.leftAlone, objRef(it))
 		}
 	}
+	api := apiCache{}
 	for _, batch := range [][]map[string]any{first, rest} {
-		if len(batch) == 0 {
-			continue
-		}
-		if err := kubeSend(t, dir, "create", batch); err != nil {
-			rep.errors = append(rep.errors, err.Error())
-		}
-		created := currentObjects(t, dir, batch)
-		for _, it := range batch {
-			if _, ok := created[objKey(it)]; ok {
-				rep.created = append(rep.created, objRef(it))
-				if kindOf(it) == "PersistentVolumeClaim" {
-					rep.pvcs++
-				}
+		ok, errs := kubeSend(t, api, "create", batch)
+		rep.errors = append(rep.errors, errs...)
+		for _, it := range ok {
+			rep.created = append(rep.created, objRef(it))
+			if kindOf(it) == "PersistentVolumeClaim" {
+				rep.pvcs++
 			}
 		}
 	}
-	if len(repl) > 0 {
-		if err := kubeSend(t, dir, "replace", repl); err != nil {
-			rep.errors = append(rep.errors, err.Error())
-		} else {
-			for _, it := range repl {
-				rep.replaced = append(rep.replaced, objRef(it))
-			}
-		}
+	ok, errs := kubeSend(t, api, "replace", repl)
+	rep.errors = append(rep.errors, errs...)
+	for _, it := range ok {
+		rep.replaced = append(rep.replaced, objRef(it))
 	}
 	return rep
 }
 
-// kubeSend runs kubectl create or replace on a list of objects.
-func kubeSend(t tool, dir, verb string, objs []map[string]any) error {
-	data, err := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "List", "items": objs})
-	if err != nil {
-		return err
+// kubeSend creates (POST) or replaces (PUT) each object through kubectl's
+// raw API access. kubectl create and replace would rewrite the kubectl last
+// applied annotation from the object itself; raw requests send the saved
+// object exactly as it was.
+func kubeSend(t tool, api apiCache, verb string, objs []map[string]any) (ok []map[string]any, errs []string) {
+	for _, it := range objs {
+		path, err := api.path(t, it)
+		if err != nil {
+			errs = append(errs, objRef(it)+": "+err.Error())
+			continue
+		}
+		if verb == "replace" {
+			path += "/" + nameOf(it)
+		}
+		data, _ := json.Marshal(it)
+		if _, err := t.run(restoreTimeout, bytes.NewReader(data), nil, verb, "--raw", path, "--filename=-"); err != nil {
+			errs = append(errs, objRef(it)+": "+err.Error())
+			continue
+		}
+		ok = append(ok, it)
 	}
-	_, err = t.run(restoreTimeout, bytes.NewReader(data), nil, verb, "--filename=-")
-	return err
+	return ok, errs
+}
+
+// apiCache maps each apiVersion to its resources, read once from the API
+// server's discovery documents.
+type apiCache map[string]map[string]apiResource
+
+type apiResource struct {
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Namespaced bool   `json:"namespaced"`
+}
+
+// path is the collection URL an object is created in, such as
+// /apis/apps/v1/namespaces/prod/deployments.
+func (c apiCache) path(t tool, it map[string]any) (string, error) {
+	av, _ := it["apiVersion"].(string)
+	base := "/apis/" + av
+	if !strings.Contains(av, "/") {
+		base = "/api/" + av
+	}
+	kinds, ok := c[av]
+	if !ok {
+		out, err := t.run(restoreTimeout, nil, nil, "get", "--raw", base)
+		if err != nil {
+			return "", fmt.Errorf("the cluster does not serve %s: %v", av, err)
+		}
+		var list struct {
+			Resources []apiResource `json:"resources"`
+		}
+		if err := json.Unmarshal(out, &list); err != nil {
+			return "", err
+		}
+		kinds = map[string]apiResource{}
+		for _, r := range list.Resources {
+			if !strings.Contains(r.Name, "/") { // skip subresources such as pods/log
+				kinds[r.Kind] = r
+			}
+		}
+		c[av] = kinds
+	}
+	r, ok := kinds[kindOf(it)]
+	if !ok {
+		return "", fmt.Errorf("the cluster has no %s in %s", kindOf(it), av)
+	}
+	if r.Namespaced {
+		ns := nsOf(it)
+		if ns == "" {
+			ns = "default"
+		}
+		base += "/namespaces/" + ns
+	}
+	return base + "/" + r.Name, nil
 }
 
 // currentObjects reads which of objs exist now, keyed by objKey.
