@@ -55,6 +55,9 @@ func startConPTY(t *testing.T, cmdline, dir string, env []string) *conPTY {
 	}
 	si := &windows.StartupInfoEx{ProcThreadAttributeList: attrs.List()}
 	si.Cb = uint32(unsafe.Sizeof(*si))
+	// Without this, cmd.exe would write to the test's own redirected
+	// stdout instead of the pseudo console.
+	si.Flags = windows.STARTF_USESTDHANDLES
 	var pi windows.ProcessInformation
 	cl, _ := windows.UTF16PtrFromString(cmdline)
 	wd, _ := windows.UTF16PtrFromString(dir)
