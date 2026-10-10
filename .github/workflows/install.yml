@@ -1,9 +1,23 @@
 name: install
-# Installs the published release the way users do, on clean Windows runners.
+# Installs a published release the way users do, on clean runners: Scoop and
+# the PowerShell one liner on Windows, the curl one liner on Linux and macOS,
+# plus pinning an older version with each.
 on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version expected as the latest, without the v (empty: whatever is latest)"
+        required: false
+      pinned:
+        description: "An older version to pin, without the v"
+        required: false
+        default: "0.2.0"
+
+env:
+  WANT: ${{ inputs.version || github.event.release.tag_name }}
+  PINNED: ${{ inputs.pinned || '0.2.0' }}
 
 jobs:
   scoop:
@@ -27,7 +41,9 @@ jobs:
       - name: Run it
         shell: pwsh
         run: |
-          oops --version
+          $v = oops --version
+          $v
+          if ($env:WANT -and $v -notmatch [regex]::Escape($env:WANT.TrimStart('v'))) { throw "expected $env:WANT" }
           oops-db --version
           oops init --only powershell,claude
           oops doctor
@@ -40,6 +56,14 @@ jobs:
           oops -y
           if ((Get-Content demo\notes.txt) -ne 'keep me') { throw 'restore failed' }
           oops uninstall
+      - name: Pin an older version
+        shell: pwsh
+        run: |
+          scoop uninstall oopsy
+          scoop install "oopsy/oopsy@$env:PINNED"
+          $v = oops --version
+          $v
+          if ($v -notmatch [regex]::Escape($env:PINNED)) { throw "expected $env:PINNED" }
 
   powershell-oneliner:
     strategy:
@@ -58,5 +82,36 @@ jobs:
         run: |
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
           Get-Command oops | Format-List Source
-          oops --version
+          $v = oops --version
+          $v
+          if ($env:WANT -and $v -notmatch [regex]::Escape($env:WANT.TrimStart('v'))) { throw "expected $env:WANT" }
           oops doctor
+      - name: Pin an older version
+        run: |
+          $env:OOPS_VERSION = $env:PINNED
+          irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+          $v = oops --version
+          $v
+          if ($v -notmatch [regex]::Escape($env:PINNED)) { throw "expected $env:PINNED" }
+
+  curl:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: curl install.sh | sh
+        run: |
+          curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPSY_BIN_DIR="$HOME/bin" sh
+          v="$("$HOME/bin/oops" --version)"
+          echo "$v"
+          if [ -n "$WANT" ]; then case "$v" in *"${WANT#v}"*) ;; *) echo "expected $WANT"; exit 1 ;; esac; fi
+          "$HOME/bin/oops" explain rm -rf build
+      - name: Pin an older version
+        run: |
+          curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPS_VERSION="$PINNED" OOPSY_BIN_DIR="$HOME/pinned" sh
+          v="$("$HOME/pinned/oops" --version)"
+          echo "$v"
+          case "$v" in *"$PINNED"*) ;; *) echo "expected $PINNED"; exit 1 ;; esac
