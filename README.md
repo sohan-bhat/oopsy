@@ -2,6 +2,8 @@
 
 **Undo for the terminal.** Oopsy snapshots your files, git state and Postgres data right before a destructive command runs, whether you typed it or your AI agent did. Type `oops` and it is back.
 
+Website: https://sohan-bhat.github.io/oopsy/
+
 ```console
 $ rm -rf src
 oops: saved snapshot 12 (214 items, 3.1 MB). Run oops to undo.
