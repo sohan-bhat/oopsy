@@ -50,6 +50,25 @@ jobs:
           New-Item -ItemType Directory R:\oops-test | Out-Null
           fsutil fsinfo volumeinfo R: | Select-String 'Block Cloning|File System Name'
           echo "OOPS_TEST_REFS=R:\oops-test" >> $env:GITHUB_ENV
+      - name: Install Terraform for the remote undo tests
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Start a kind cluster for the remote undo tests (Linux)
+        if: runner.os == 'Linux'
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: oopsy
+      - name: Install Helm (Linux)
+        if: runner.os == 'Linux'
+        uses: azure/setup-helm@v4
+      - name: Point the remote undo tests at the cluster (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          kubectl cluster-info
+          docker pull -q alpine:3.20
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+          echo "OOPS_TEST_REMOTE=1" >> "$GITHUB_ENV"
       - run: go vet ./...
       - run: go test ./internal/... ./cmd/...
       - if: success() || failure()
