@@ -138,6 +138,7 @@
       <li class="step">
         <h3 class="step__title">It snapshots first</h3>
         <p>When a command is about to destroy files, Oopsy clones them first. Copy on write on APFS and Linux reflinks makes that instant and nearly free on disk.</p>
+        <p class="step__more">It reads the command with a real shell parser, so it knows <code>rm</code>, <code>mv</code>, <code>cp</code>, <code>sed -i</code>, <code>dd</code>, <code>find -delete</code>, <code>rsync --delete</code>, redirects, and <code>git reset</code>, <code>clean</code>, <code>checkout</code>, <code>branch -D</code>, <code>stash drop</code> and <code>push --force</code>.</p>
       </li>
       <li class="step">
         <h3 class="step__title">You type oops</h3>
@@ -191,6 +192,8 @@
         <li>Deletes buried inside a script. Oopsy sees <code>./cleanup.sh</code>, not the <code>rm</code> inside it.</li>
         <li>Remote servers and network drives. It protects the disk it runs on.</li>
         <li>Database writes that skip the proxy, and databases other than Postgres.</li>
+        <li>Targets too broad to clone, like <code>/</code> or your whole home folder. Oopsy says so instead of pretending.</li>
+        <li>Huge folders on filesystems without copy on write. Plain copies stop at 1 GB per command, and Oopsy tells you what it skipped.</li>
         <li>A dead disk. Snapshots live next to your files, so keep a real backup too.</li>
       </ul>
     </div>
@@ -215,7 +218,7 @@
       </details>
       <details class="qa">
         <summary>How much disk does it use?</summary>
-        <p>On APFS and on Linux filesystems with reflinks, like Btrfs and XFS, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On other filesystems Oopsy falls back to a regular copy. <code>oops list</code> shows what is kept.</p>
+        <p>On APFS and on Linux filesystems with reflinks, like Btrfs and XFS, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On other filesystems Oopsy falls back to a regular copy, up to 1 GB per command. Snapshots are kept for 7 days and capped at 5 GB in total, and you can change both in <code>~/.oops/config.json</code>.</p>
       </details>
     </div>
   </div>

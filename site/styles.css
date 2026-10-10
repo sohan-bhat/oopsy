@@ -365,6 +365,7 @@ button { font: inherit; color: inherit; }
 .step:nth-child(3)::before { background: var(--pencil); }
 .step__title { font-size: 20px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.01em; }
 .step p { color: var(--muted); }
+.step .step__more { margin-top: 10px; font-size: 15px; line-height: 1.6; }
 .step code, .pg__copy code, .limits code, .qa code {
   background: #efedf1; color: var(--ink); padding: .1em .32em; border-radius: 5px;
 }
