@@ -74,3 +74,9 @@ func cloneFile(src, dst string, fi os.FileInfo) error {
 	}
 	return plainCopy(src, dst, fi)
 }
+
+// cloneOnly reflinks one file and fails instead of copying.
+func cloneOnly(src, dst string, fi os.FileInfo) error { return reflinkFile(src, dst, fi) }
+
+// cloneDir is APFS only; elsewhere folders are mirrored file by file.
+func cloneDir(string, string) bool { return false }

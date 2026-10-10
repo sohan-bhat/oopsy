@@ -161,3 +161,9 @@ func blockCloneFile(src, dst string, fi os.FileInfo) error {
 	ok = true
 	return nil
 }
+
+// cloneOnly block clones one file and fails instead of copying.
+func cloneOnly(src, dst string, fi os.FileInfo) error { return blockCloneFile(src, dst, fi) }
+
+// cloneDir is APFS only; elsewhere folders are mirrored file by file.
+func cloneDir(string, string) bool { return false }
