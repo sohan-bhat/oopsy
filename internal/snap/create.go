@@ -38,6 +38,7 @@ func Create(command, cwd, source string, actions []classify.Action, captures ...
 	}
 
 	var paths, overwritten []string
+	rebuildable := map[string]bool{}
 	gitOwned := map[string]string{}
 	seenProg := map[string]bool{}
 	for _, a := range actions {
@@ -52,6 +53,11 @@ func Create(command, cwd, source string, actions []classify.Action, captures ...
 			s.Notes = append(s.Notes, a.Note)
 		}
 		paths = append(paths, a.Paths...)
+		if a.Rebuildable {
+			for _, p := range a.Paths {
+				rebuildable[pathKey(filepath.Clean(p))] = true
+			}
+		}
 		if !a.Delete {
 			overwritten = append(overwritten, a.Paths...)
 		}
@@ -82,7 +88,7 @@ func Create(command, cwd, source string, actions []classify.Action, captures ...
 			s.Skipped = append(s.Skipped, Skip{Path: p, Reason: reason})
 			continue
 		}
-		e := Entry{Orig: p, Store: filepath.Join("files", fmt.Sprint(i)), GitRepo: gitOwned[p]}
+		e := Entry{Orig: p, Store: filepath.Join("files", fmt.Sprint(i)), GitRepo: gitOwned[p], Rebuildable: rebuildable[pathKey(p)]}
 		switch kindOf(fi) {
 		case kindSymlink:
 			e.Type = "symlink"
