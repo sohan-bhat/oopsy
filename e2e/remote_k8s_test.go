@@ -91,10 +91,16 @@ func k8sState(t *testing.T, e *env, ns string, refs ...string) map[string]string
 	t.Helper()
 	out := e.mustTool("kubectl", append([]string{"get", "-n", ns, "-o", "json"}, refs...)...)
 	var list struct {
+		Kind  string           `json:"kind"`
 		Items []map[string]any `json:"items"`
 	}
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		t.Fatal(err)
+	}
+	if list.Kind != "List" { // one object comes back on its own
+		var one map[string]any
+		json.Unmarshal([]byte(out), &one)
+		list.Items = []map[string]any{one}
 	}
 	state := map[string]string{}
 	for _, it := range list.Items {
