@@ -2,10 +2,10 @@ package snap
 
 import (
 	"fmt"
-	"strings"
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // On disks where the mirror uses hard links, a program that writes into a
@@ -83,7 +83,7 @@ func (m *Mirror) addBackupEntry(s *Snapshot, c, old node, parentTime int64, back
 	}
 	*k++
 	if fi, err := os.Stat(target); err == nil {
-		e.Size = fi.Size()
+		e.Size = allocBytes(target, fi)
 		e.Disk = diskUsage(target)
 	}
 	s.Entries = append(s.Entries, e)
