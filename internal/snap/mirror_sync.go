@@ -274,6 +274,7 @@ func (m *Mirror) attribute(p *Pending, old, removed, changed []node, res *SyncRe
 				switch {
 				case c.kind == 'd':
 					applyDirMode(filepath.Join(target, filepath.FromSlash(rel)), c.mode)
+					setDirCreated(filepath.Join(target, filepath.FromSlash(rel)), c.size)
 				case c.kind == 'f' && m.Method == "hardlink" && fragileMode(c.mode):
 					if e.Attrs == nil {
 						e.Attrs = map[string]uint32{}
@@ -288,6 +289,7 @@ func (m *Mirror) attribute(p *Pending, old, removed, changed []node, res *SyncRe
 				}
 			}
 			applyDirMode(target, n.mode)
+			setDirCreated(target, n.size)
 			setMtime(target, n.mtime)
 		case 'l':
 			e.Type = "symlink"
