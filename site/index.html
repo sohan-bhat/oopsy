@@ -153,7 +153,7 @@
   <div class="wrap pg__grid">
     <div class="pg__copy">
       <h2 id="pg-title" class="h2">Postgres, too.</h2>
-      <p>Run <code>oops db proxy --upstream postgres://...</code> and point your app or agent at the proxy instead. Before any <code>DROP TABLE</code>, <code>TRUNCATE</code>, <code>DELETE</code> or <code>UPDATE</code> reaches the database, Oopsy saves the rows it is about to touch.</p>
+      <p>Run <code>oops db proxy --upstream postgres://...</code> and point your app or agent at the proxy instead. Before any <code>DROP TABLE</code>, <code>TRUNCATE</code>, <code>DELETE</code> or <code>UPDATE</code> reaches the database, Oopsy copies exactly the rows it is about to touch, inside the same transaction, so a rollback discards the snapshot too.</p>
       <p>Or skip the setup: <code>oops db wrap -- npm run dev</code> runs your command with <code>DATABASE_URL</code> pointed at a temporary proxy.</p>
       <p>Forgot the <code>WHERE</code>? <code>oops db undo</code>.</p>
     </div>
@@ -182,7 +182,7 @@
       <h2 id="fit-title" class="h2">Works with</h2>
       <dl class="works">
         <div class="works__row"><dt>Shells</dt><dd><span>zsh</span><span>bash</span><span>fish</span></dd></div>
-        <div class="works__row"><dt>Agents</dt><dd><span>Claude Code</span><span>Codex</span><span>Cursor</span><span>Gemini CLI</span></dd></div>
+        <div class="works__row"><dt>Agents</dt><dd><span>Claude Code</span><span>Codex CLI</span><span>Cursor</span><span>Gemini CLI</span></dd></div>
         <div class="works__row"><dt>Databases</dt><dd><span>Postgres</span></dd></div>
         <div class="works__row"><dt>Systems</dt><dd><span>macOS</span><span>Linux</span></dd></div>
       </dl>
@@ -190,12 +190,11 @@
     <div>
       <h2 class="h2">What it does not catch</h2>
       <ul class="limits" role="list" id="limits">
-        <li>Commands that never pass through a hooked shell or agent, like cron jobs, GUI apps or a program deleting files on its own.</li>
-        <li>Deletes buried inside a script. Oopsy sees <code>./cleanup.sh</code>, not the <code>rm</code> inside it.</li>
-        <li>Remote servers and network drives. It protects the disk it runs on.</li>
-        <li>Database writes that skip the proxy, and databases other than Postgres.</li>
-        <li>Targets too broad to clone, like <code>/</code> or your whole home folder. Oopsy says so instead of pretending.</li>
-        <li>Huge folders on filesystems without copy on write. Plain copies stop at 1 GB per command, and Oopsy tells you what it skipped.</li>
+        <li>Programs that delete things themselves. Oopsy reads the command line, so <code>make clean</code>, <code>npm run reset</code> or a script that removes files is invisible to it.</li>
+        <li>File edits made in an editor, or by an agent's own edit tool instead of the shell.</li>
+        <li>Anything remote, like <code>ssh</code>, <code>kubectl delete</code> or <code>terraform destroy</code>.</li>
+        <li>Database changes that skip the proxy, plus <code>DROP DATABASE</code>, <code>DROP VIEW</code> and upserts.</li>
+        <li>Huge folders on filesystems without copy on write. Plain copies stop at 1 GB, and Oopsy tells you what it skipped.</li>
         <li>A dead disk. Snapshots live next to your files, so keep a real backup too.</li>
       </ul>
     </div>
