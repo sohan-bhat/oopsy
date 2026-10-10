@@ -310,7 +310,7 @@ func doctorCmd() *cobra.Command {
 				ok("copy on write", storageKind())
 			default:
 				if runtime.GOOS == "windows" {
-					ok("copy on write", "not on NTFS; using "+storageKind())
+					ok("copy on write", "none on this volume (NTFS), so it uses "+storageKind())
 				} else {
 					warnf("copy on write", storageKind())
 				}
