@@ -17,14 +17,16 @@ import (
 
 // Config holds user settings from ~/.oops/config.json.
 type Config struct {
-	KeepDays     int   `json:"keep_days"`
-	MaxBytes     int64 `json:"max_bytes"`
-	CopyCapBytes int64 `json:"copy_cap_bytes"`
-	Quiet        bool  `json:"quiet"`
+	KeepDays int   `json:"keep_days"`
+	MaxBytes int64 `json:"max_bytes"`
+	// FreeFloorBytes overrides the free space floor copies must leave on
+	// a disk (see FreeFloor). Zero means automatic.
+	FreeFloorBytes int64 `json:"free_floor_bytes,omitempty"`
+	Quiet          bool  `json:"quiet"`
 }
 
 // DefaultConfig is used when no config file exists.
-var DefaultConfig = Config{KeepDays: 7, MaxBytes: 5 << 30, CopyCapBytes: 1 << 30}
+var DefaultConfig = Config{KeepDays: 7, MaxBytes: 5 << 30}
 
 // Dir returns the Oopsy home directory ($OOPS_HOME or ~/.oops).
 func Dir() string {
@@ -55,14 +57,15 @@ func LoadConfig() Config {
 			cfg = DefaultConfig
 		}
 	}
+	// Tests run on disks of any fullness; they set the floor explicitly.
+	if v, err := strconv.ParseInt(os.Getenv("OOPS_FREE_FLOOR_BYTES"), 10, 64); err == nil && v > 0 {
+		cfg.FreeFloorBytes = v
+	}
 	if cfg.KeepDays <= 0 {
 		cfg.KeepDays = DefaultConfig.KeepDays
 	}
 	if cfg.MaxBytes <= 0 {
 		cfg.MaxBytes = DefaultConfig.MaxBytes
-	}
-	if cfg.CopyCapBytes <= 0 {
-		cfg.CopyCapBytes = DefaultConfig.CopyCapBytes
 	}
 	return cfg
 }

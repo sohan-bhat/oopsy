@@ -585,7 +585,7 @@ func explainCmd() *cobra.Command {
 func configCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "config [key value]",
-		Short: "Show or change settings (keep_days, max_gb, copy_cap_gb, quiet)",
+		Short: "Show or change settings (keep_days, max_gb, free_floor_gb, quiet)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			warnConfig()
@@ -593,7 +593,11 @@ func configCmd() *cobra.Command {
 			if len(args) == 0 {
 				fmt.Printf("keep_days    %d\n", cfg.KeepDays)
 				fmt.Printf("max_gb       %.1f\n", float64(cfg.MaxBytes)/(1<<30))
-				fmt.Printf("copy_cap_gb  %.1f\n", float64(cfg.CopyCapBytes)/(1<<30))
+				if cfg.FreeFloorBytes > 0 {
+					fmt.Printf("free_floor_gb %.1f\n", float64(cfg.FreeFloorBytes)/(1<<30))
+				} else {
+					fmt.Printf("free_floor_gb auto (5%% of the disk, between 2 and 20 GB)\n")
+				}
 				fmt.Printf("quiet        %v\n", cfg.Quiet)
 				fmt.Println(ui.Dim("Stored in " + ui.HomeRel(snap.ConfigPath())))
 				return nil
@@ -614,15 +618,19 @@ func configCmd() *cobra.Command {
 					return cli.UsageErr("max_gb must be a positive number, for example: oops config max_gb 10")
 				}
 				cfg.MaxBytes = int64(f * (1 << 30))
-			case "copy_cap_gb":
-				if ferr != nil || f <= 0 {
-					return cli.UsageErr("copy_cap_gb must be a positive number, for example: oops config copy_cap_gb 2")
+			case "free_floor_gb":
+				if v == "auto" {
+					cfg.FreeFloorBytes = 0
+					break
 				}
-				cfg.CopyCapBytes = int64(f * (1 << 30))
+				if ferr != nil || f <= 0 {
+					return cli.UsageErr("free_floor_gb must be a positive number or auto, for example: oops config free_floor_gb 4")
+				}
+				cfg.FreeFloorBytes = int64(f * (1 << 30))
 			case "quiet":
 				cfg.Quiet = v == "true" || v == "1" || v == "yes"
 			default:
-				return cli.UsageErr("%q is not a setting. The settings are keep_days, max_gb, copy_cap_gb and quiet; oops config shows them all", args[0])
+				return cli.UsageErr("%q is not a setting. The settings are keep_days, max_gb, free_floor_gb and quiet; oops config shows them all", args[0])
 			}
 			if err := snap.SaveConfig(cfg); err != nil {
 				return err

@@ -23,6 +23,7 @@ func testEnv(t *testing.T) string {
 	t.Helper()
 	root, _ := filepath.EvalSymlinks(t.TempDir())
 	t.Setenv("OOPS_HOME", filepath.Join(root, "store"))
+	t.Setenv("OOPS_FREE_FLOOR_BYTES", "1")
 	work := filepath.Join(root, "work")
 	writeTree(t, work, map[string]string{
 		"a.txt":         "alpha\n",
