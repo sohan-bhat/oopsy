@@ -1,6 +1,6 @@
 # Oopsy
 
-**Undo for `rm -rf`, and everything else you wish you hadn't run.** Files (deletes and overwrites), git (resets, branches, stashes, force pushes) and Postgres (drops, deletes, bad updates). Oopsy snapshots it right before it is destroyed, whether you typed the command or your AI agent did. Type `oops` and it is back.
+**Undo for `rm -rf`, and everything else you wish you hadn't run.** Files (deletes and overwrites, by any command, including `make clean`, npm scripts and scripts Oopsy has never seen), git (resets, branches, stashes, force pushes) and Postgres (drops, deletes, bad updates). Oopsy snapshots it right before it is destroyed, whether you typed the command or your AI agent did. Type `oops` and it is back.
 
 Website: https://sohan-bhat.github.io/oopsy/
 
@@ -92,15 +92,25 @@ oops db undo
 
 ## How it works
 
-The shell hook runs right before each command. A quick regex skips anything harmless without starting a process. Otherwise Oopsy parses the command with a real shell parser, expands variables and globs the way your shell will, and works out exactly which paths, git refs or stashes are about to be destroyed. It saves them under `~/.oops` the cheapest safe way the disk allows:
+Oopsy has two layers.
 
-* a copy on write clone: APFS on macOS, reflinks on btrfs and xfs, block cloning on ReFS and Dev Drive. Instant, and no extra disk until the original changes.
-* hard links when the command only deletes (`rm`, `Remove-Item`, `del`, `git clean`), on NTFS and ext4. Also instant and free, since the data simply stays alive through the snapshot.
-* a real copy for overwrites where neither works: NTFS compressed on Windows, zstd compressed elsewhere (files that are already compressed, like images and archives, are stored as they are). A copy can be any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, at least 2 GB and at most 20 GB, which is about where ext4 keeps space back for root and where macOS and Windows start warning. If a copy would break the floor, Oopsy skips it and tells you right then. Change the floor with `oops config free_floor_gb 4`.
+**The command line layer** is fast and precise. The shell hook runs right before each command. Oopsy parses it with a real shell parser, expands variables and globs the way your shell will, and works out exactly which paths, git refs or stashes are about to be destroyed, including paths outside your project.
+
+**The project mirror** catches everything else, so a program that deletes or rewrites files by itself (`make clean`, `npm run reset`, a Python script) is undoable too. For every project you work in (the git work tree around you, or the folder itself), Oopsy keeps a standing mirror that costs almost no disk: each file is a copy on write clone or a hard link of the original, plus a compact index. Before a command that is not provably read only, a quick stat walk brings the mirror up to date (about 20 to 30 ms for 10,000 files, see the numbers below). After the command, the walk runs again in the background at your next prompt, and every file the command changed or removed moves from the mirror into that command's snapshot. `oops` undoes it exactly, swapping changed files back while they are still what the command left.
+
+* Read only lines (`ls`, `cat`, `grep`, `git status`, `git log` and friends) are skipped inside the shell itself, at no cost.
+* Rebuildable folders (`node_modules`, `target`, `.venv`, `venv`, `dist`, `build`, `.next`, `__pycache__`, `.gradle`, and anything in a `.oopsignore`) are not mirrored file by file. When a command is about to touch one, because it names it or a script it runs does (Oopsy reads npm, yarn, pnpm and bun scripts in `package.json`, asks `make -n` for its plan, and reads script files the command runs), the whole folder is saved right then as one clone or hard link tree, and kept for a day instead of seven.
+* The first time you run a command in a big project (over 3,000 files), the mirror is built in the background; until then only the command line layer covers it. Projects over 50,000 files are left to the command line layer (`oops config mirror_max_files` changes that).
+
+Snapshots are saved the cheapest safe way the disk allows:
+
+* a copy on write clone: APFS on macOS, reflinks on btrfs and xfs, block cloning on ReFS and Dev Drive. Instant, and no extra disk until the original changes; an overwrite then keeps only the changed blocks.
+* hard links on NTFS and ext4. Also instant and free, since the data stays alive through the snapshot. A hard link shares the file, so a program that writes into a file in place (instead of replacing it) would change the link too. On Linux, Oopsy's shells load a small preload library that copies a mirrored file right before a program first writes into it. Statically linked programs, like most Go binaries, do not load preload libraries.
+* a real copy for overwrites the command line names, where neither works: NTFS compressed on Windows, zstd compressed elsewhere (files that are already compressed are stored as they are). A copy can be any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, at least 2 GB and at most 20 GB, which is about where ext4 keeps space back for root and where macOS and Windows start warning. If a copy would break the floor, Oopsy skips it and tells you right then. Change the floor with `oops config free_floor_gb 4`.
 
 When the folder is on another drive than your home, hard links and clones go to a private store at that drive's root (`D:\.oops` on Windows, readable only by you). Snapshots are pruned after 7 days or past 5 GB (`oops config` to change).
 
-PowerShell has no preexec hook, so Oopsy wraps the function PSReadLine uses to read each line and checks it after you press Enter, before it runs. The PowerShell parser knows `Remove-Item` and its aliases, `Move-Item`, `Copy-Item`, `Set-Content`, `Out-File`, redirects and pipelines like `Get-ChildItem *.log | Remove-Item`. Agent commands on Windows are read as bash, PowerShell and cmd.exe at once.
+PowerShell has no preexec hook, so Oopsy wraps the function PSReadLine uses to read each line and checks it after you press Enter, before it runs, and runs the after step from the prompt function. The PowerShell parser knows `Remove-Item` and its aliases, `Move-Item`, `Copy-Item`, `Set-Content`, `Out-File`, redirects and pipelines like `Get-ChildItem *.log | Remove-Item`. Agent commands on Windows are read as bash, PowerShell and cmd.exe at once.
 
 Restores never overwrite newer work: if something exists at the path again, both copies are kept.
 
@@ -108,7 +118,9 @@ The Postgres proxy speaks the wire protocol and parses every statement. Before a
 
 ## What it does not catch
 
-* Programs that delete things themselves. Oopsy reads the command line, so `make clean`, `npm run reset` or a Python script that removes files are invisible to it.
+* A program that writes into a file in place on NTFS, or a statically linked program doing so on ext4. The mirror there uses hard links, which share the file, so Oopsy notices the change but cannot keep the old version, and says so.
+* A rebuildable folder like `node_modules` deleted by a program that does not name it anywhere Oopsy can read. Rebuild it.
+* Commands run right in your home folder or a system folder, and projects over 50,000 files: only what the command line names is saved there.
 * Anything remote: `ssh`, `rsync` to another host, cloud resources, `kubectl delete`, `docker volume rm`, `terraform destroy`.
 * File edits made by an editor or by an agent's own edit tool rather than the shell.
 * Database changes that do not go through the proxy, plus `DROP DATABASE`, `DROP INDEX`, `DROP VIEW`, deletes inside functions or triggers, and upserts. Grants and row level security policies are not restored. An `UPDATE` on a table without a primary key is undone by restoring the whole table.
