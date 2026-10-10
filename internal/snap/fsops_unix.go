@@ -91,10 +91,17 @@ func copyLink(src, dst string, fi os.FileInfo) error {
 // mandatory locks that stop reading, so this never happens there.
 func isLocked(error) bool { return false }
 
-// readOnlyAttr and fragileAttrs only matter on Windows, where deleting a
-// read only file clears attributes on every hard link to it.
-const readOnlyAttr = 0
+// fragileAttrs records the mode of a hard linked file that is not writable:
+// PowerShell's Remove-Item -Force makes such a file writable before deleting
+// it, and that change shows through the snapshot's link too.
+func fragileAttrs(fi os.FileInfo) (uint32, bool) {
+	if fi.Mode().Perm()&0o200 != 0 {
+		return 0, false
+	}
+	return uint32(fi.Mode().Perm() | fi.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky)), true
+}
 
-func fragileAttrs(os.FileInfo) (uint32, bool) { return 0, false }
+// recordedReadOnly: every recorded mode is a read only one.
+func recordedReadOnly(uint32) bool { return true }
 
-func applyAttrs(string, uint32) {}
+func applyAttrs(p string, a uint32) { _ = os.Chmod(p, os.FileMode(a)) }

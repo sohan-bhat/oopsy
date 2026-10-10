@@ -87,8 +87,9 @@ type Entry struct {
 	// Disk is the extra disk the snapshot took when it was made: zero for
 	// clones and hard links, which share the original's data.
 	Disk int64 `json:"disk"`
-	// Attrs holds Windows attributes of hard linked files that a delete may
-	// clear (read only, hidden, system), keyed by path relative to Orig.
+	// Attrs holds what a delete may clear on hard linked files, keyed by path
+	// relative to Orig: Windows attributes (read only, hidden, system), or
+	// the mode of read only files on Unix.
 	Attrs map[string]uint32 `json:"attrs,omitempty"`
 	// Base is set when the data lives in a store on another volume.
 	Base string `json:"base,omitempty"`

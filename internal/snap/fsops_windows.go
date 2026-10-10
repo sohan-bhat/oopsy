@@ -234,7 +234,7 @@ func isLocked(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
 
-const readOnlyAttr = windows.FILE_ATTRIBUTE_READONLY
+func recordedReadOnly(a uint32) bool { return a&windows.FILE_ATTRIBUTE_READONLY != 0 }
 
 // fragileAttrs returns the attributes worth recording for a hard linked file:
 // Remove-Item -Force and del /f clear read only, hidden and system before
