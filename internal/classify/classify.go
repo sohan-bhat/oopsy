@@ -1115,6 +1115,7 @@ func findDryRun(cwd string, head, expr []string) ([]string, bool) {
 		return nil, false
 	}
 	cmd := exec.CommandContext(ctx, findBin, argv...)
+	quoteForMSYS(cmd)
 	cmd.Dir = cwd
 	var out bytes.Buffer
 	cmd.Stdout = &out
