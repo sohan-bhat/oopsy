@@ -62,6 +62,7 @@
         <li><b>Files</b> deletes and overwrites</li>
         <li><b>Git</b> resets, branches, stashes, force pushes</li>
         <li><b>Postgres</b> drops, deletes, bad updates</li>
+        <li><b>Infra</b> kubectl, terraform, docker volumes, helm</li>
       </ul>
 
       <div class="install" id="install">
@@ -191,6 +192,7 @@
         <div class="works__row"><dt>Shells</dt><dd><span>zsh</span><span>bash</span><span>fish</span><span>PowerShell</span><span>Git Bash</span></dd></div>
         <div class="works__row"><dt>Agents</dt><dd><span>Claude Code</span><span>Codex CLI</span><span>Cursor</span><span>Gemini CLI</span></dd></div>
         <div class="works__row"><dt>Databases</dt><dd><span>Postgres</span></dd></div>
+        <div class="works__row"><dt>Infra</dt><dd><span>kubectl</span><span>Terraform</span><span>Docker volumes</span><span>Helm</span></dd></div>
         <div class="works__row"><dt>Systems</dt><dd><span>macOS</span><span>Linux</span><span>Windows</span></dd></div>
       </dl>
     </div>
@@ -200,7 +202,8 @@
         <li>A program that writes into a file in place on NTFS, or a statically linked one doing so on ext4. The project mirror there shares the file through a hard link, so Oopsy sees the change but cannot keep the old version, and says so.</li>
         <li>A rebuildable folder like <code>node_modules</code> deleted by a program that never names it anywhere Oopsy can read. Rebuild it.</li>
         <li>File edits made in an editor, or by an agent's own edit tool instead of the shell.</li>
-        <li>Anything remote, like <code>ssh</code>, <code>kubectl delete</code> or <code>terraform destroy</code>.</li>
+        <li>Other machines. Commands run over <code>ssh</code> change another computer, so undo there needs Oopsy installed there too.</li>
+        <li>Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, files or disks inside cloud resources.</li>
         <li>Database changes that skip the proxy, plus <code>DROP DATABASE</code>, <code>DROP VIEW</code> and upserts.</li>
         <li>An overwrite on a disk without copy on write, like NTFS and ext4, when the copy would leave less than the free space floor. Oopsy skips it and tells you right then.</li>
         <li>Commands typed straight into cmd.exe, which has no hook. PowerShell, Git Bash and agent commands are covered.</li>
