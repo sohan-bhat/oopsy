@@ -399,6 +399,7 @@ func diffCmd() *cobra.Command {
 			budget := 400
 			for _, e := range s.Entries {
 				root := s.EntryPath(e)
+				zstd := e.Method == "zstd copy"
 				_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 					if err != nil {
 						return nil
@@ -429,14 +430,14 @@ func diffCmd() *cobra.Command {
 						}
 						return nil
 					}
-					if filesEqual(p, cur) {
+					if filesEqual(p, cur, zstd) {
 						same++
 						return nil
 					}
 					changed++
 					fmt.Printf("%s %s\n", ui.Warn("changed"), ui.HomeRel(cur))
 					if !noContent && budget > 0 {
-						budget -= showUnified(p, cur, budget)
+						budget -= showUnified(p, cur, budget, zstd)
 					}
 					return nil
 				})
@@ -453,7 +454,17 @@ func diffCmd() *cobra.Command {
 	return c
 }
 
-func filesEqual(a, b string) bool {
+// readSaved reads a file from a snapshot, decompressing zstd copies.
+func readSaved(p string, zstd bool) []byte {
+	if zstd {
+		b, _ := snap.ReadStored(p)
+		return b
+	}
+	b, _ := os.ReadFile(p)
+	return b
+}
+
+func filesEqual(a, b string, zstd bool) bool {
 	x, err1 := os.Lstat(a)
 	y, err2 := os.Lstat(b)
 	if err1 != nil || err2 != nil || x.Mode().Type() != y.Mode().Type() {
@@ -464,27 +475,37 @@ func filesEqual(a, b string) bool {
 		l2, _ := os.Readlink(b)
 		return l1 == l2
 	}
-	if x.Size() != y.Size() {
+	if !zstd && x.Size() != y.Size() {
 		return false
 	}
-	if x.Size() > 64<<20 {
-		return x.ModTime().Equal(y.ModTime())
+	if y.Size() > 64<<20 {
+		return !zstd && x.ModTime().Equal(y.ModTime())
 	}
-	ba, _ := os.ReadFile(a)
+	ba := readSaved(a, zstd)
 	bb, _ := os.ReadFile(b)
 	return bytes.Equal(ba, bb)
 }
 
 // showUnified prints a unified diff for small text files and returns the
 // number of lines printed.
-func showUnified(old, cur string, limit int) int {
+func showUnified(old, cur string, limit int, zstd bool) int {
 	fi, err := os.Stat(old)
 	if err != nil || fi.Size() > 1<<20 {
 		return 0
 	}
-	b, _ := os.ReadFile(old)
-	if bytes.IndexByte(b, 0) >= 0 {
+	b := readSaved(old, zstd)
+	if bytes.IndexByte(b, 0) >= 0 || len(b) > 1<<20 {
 		return 0
+	}
+	if zstd {
+		tmp, err := os.CreateTemp("", "oops-diff-*")
+		if err != nil {
+			return 0
+		}
+		defer os.Remove(tmp.Name())
+		tmp.Write(b)
+		tmp.Close()
+		old = tmp.Name()
 	}
 	out, _ := exec.Command("diff", "-u", "--label", "snapshot", "--label", "now", old, cur).Output()
 	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")

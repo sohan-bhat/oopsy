@@ -139,11 +139,12 @@ func RestoreTo(s *Snapshot, dir string) ([]Outcome, error) {
 type placer struct {
 	root   string            // the entry's data in the store
 	linked bool              // saved with hard links, so it can be linked back
+	zstd   bool              // files are stored zstd compressed
 	attrs  map[string]uint32 // attributes recorded for hard linked files
 }
 
 func newPlacer(s *Snapshot, e Entry) placer {
-	return placer{root: s.EntryPath(e), linked: e.Method == "hardlink", attrs: e.Attrs}
+	return placer{root: s.EntryPath(e), linked: e.Method == "hardlink", zstd: e.Method == "zstd copy", attrs: e.Attrs}
 }
 
 // restorePath puts src at dst. When dst exists, directories are merged and
@@ -174,7 +175,7 @@ func (pl placer) restorePath(src, dst string, id int) []Outcome {
 		}
 		return out
 	}
-	if sameContent(src, dst, sfi, dfi) {
+	if pl.sameContent(src, dst, sfi, dfi) {
 		return []Outcome{{Path: dst, Status: "same"}}
 	}
 	alt := altName(dst, id)
@@ -194,6 +195,8 @@ func (pl placer) place(src, dst string) error {
 		c := &treeCopy{file: l.file, skipFileMeta: true}
 		err = c.walk(src, dst, true)
 		skipped = c.skipped
+	} else if pl.zstd {
+		skipped, err = copyTree(src, dst, unzcopyFile)
 	} else {
 		skipped, err = cloneTree(src, dst)
 		if errors.Is(err, errNoClone) {
@@ -240,7 +243,7 @@ func altName(dst string, id int) string {
 	}
 }
 
-func sameContent(a, b string, afi, bfi os.FileInfo) bool {
+func (pl placer) sameContent(a, b string, afi, bfi os.FileInfo) bool {
 	if afi.Mode().Type() != bfi.Mode().Type() {
 		return false
 	}
@@ -249,10 +252,16 @@ func sameContent(a, b string, afi, bfi os.FileInfo) bool {
 		y, _ := os.Readlink(b)
 		return x == y
 	}
-	if !afi.Mode().IsRegular() || afi.Size() != bfi.Size() {
+	if !afi.Mode().IsRegular() || (!pl.zstd && afi.Size() != bfi.Size()) {
 		return false
 	}
-	fa, err := os.Open(a)
+	var fa io.ReadCloser
+	var err error
+	if pl.zstd {
+		fa, err = openStored(a)
+	} else {
+		fa, err = os.Open(a)
+	}
 	if err != nil {
 		return false
 	}

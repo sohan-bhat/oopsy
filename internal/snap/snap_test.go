@@ -108,7 +108,7 @@ func TestOverwritesNeverUseHardLinks(t *testing.T) {
 	} {
 		s := create(t, filepath.Dir(work), actions...)
 		e := s.Entries[0]
-		if e.Method != "copy" && e.Method != "compressed copy" {
+		if e.Method != "zstd copy" && e.Method != "compressed copy" {
 			t.Fatalf("%v: method %q, want copy", actions, e.Method)
 		}
 		orig, _ := os.Stat(f)
@@ -118,7 +118,7 @@ func TestOverwritesNeverUseHardLinks(t *testing.T) {
 		}
 		// Writing into the original must not touch the snapshot.
 		os.WriteFile(f, []byte("changed\n"), 0o644)
-		if b, _ := os.ReadFile(storeFile(s, e, relKey(e.Orig, f))); !bytes.Equal(b, []byte("alpha\n")) {
+		if b, _ := ReadStored(storeFile(s, e, relKey(e.Orig, f))); !bytes.Equal(b, []byte("alpha\n")) {
 			t.Fatalf("snapshot changed with the original: %q", b)
 		}
 		os.WriteFile(f, []byte("alpha\n"), 0o644)
