@@ -1,7 +1,7 @@
 #!/bin/sh
 # Oopsy installer: curl -fsSL https://raw.githubusercontent.com/sohan-bhat/oopsy/main/install.sh | sh
 # Installs oops and oops-db into /usr/local/bin when writable, else ~/.local/bin.
-# Set OOPSY_VERSION=v0.1.0 to pick a version, OOPSY_BIN_DIR to pick a directory.
+# Set OOPSY_VERSION=v0.2.0 to pick a version, OOPSY_BIN_DIR to pick a directory.
 set -eu
 
 repo="sohan-bhat/oopsy"
@@ -25,7 +25,8 @@ fi
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$os" in
   darwin|linux) ;;
-  *) fail "unsupported OS: $os (Oopsy supports macOS and Linux)" ;;
+  mingw*|msys*|cygwin*) fail "on Windows, install with PowerShell: irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex" ;;
+  *) fail "unsupported OS: $os (Oopsy supports macOS, Linux and Windows)" ;;
 esac
 arch="$(uname -m)"
 case "$arch" in
