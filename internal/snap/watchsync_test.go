@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Editor saves made while no command is pending become watch snapshots
@@ -91,6 +90,17 @@ func TestWatchSyncKeepsPreviousVersions(t *testing.T) {
 // Watch leaves changes alone while a command is pending, and skips files
 // over the size limit.
 func TestWatchSyncPendingAndLimit(t *testing.T) {
+	for _, m := range []string{"", "hardlink"} {
+		t.Run("method="+m, func(t *testing.T) {
+			if m != "" {
+				withMethod(t, m)
+			}
+			watchPendingAndLimit(t)
+		})
+	}
+}
+
+func watchPendingAndLimit(t *testing.T) {
 	work := mirrorProject(t)
 	if _, err := MirrorBefore(work, Pending{Command: "./build.sh", Cwd: work, Source: "zsh"}); err != nil {
 		t.Fatal(err)
@@ -109,8 +119,11 @@ func TestWatchSyncPendingAndLimit(t *testing.T) {
 	big := filepath.Join(work, "big.bin")
 	os.WriteFile(big, make([]byte, 3000), 0o644)
 	WatchSync(work, 1000)
-	os.WriteFile(big, make([]byte, 4000), 0o644)
-	os.Chtimes(big, time.Now().Add(time.Second), time.Now().Add(time.Second))
+	UpdateWatchBase(work, 1000, true) // hard link disks keep in place writes through it
+	// The big file is replaced (so even a hard link mirror still has it),
+	// the small one written in place.
+	os.WriteFile(big+".new", make([]byte, 4000), 0o644)
+	os.Rename(big+".new", big)
 	os.WriteFile(filepath.Join(work, "config.json"), []byte("{}\n"), 0o644)
 	res, err = WatchSync(work, 1000)
 	if err != nil || res.Snapshot == nil {
