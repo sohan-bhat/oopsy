@@ -37,7 +37,25 @@
 @media (min-width: 1100px) { :root { --gutter: 48px; } }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+html {
+  -webkit-text-size-adjust: 100%; scroll-behavior: smooth;
+  /* no rubber band past the ends; if a browser still bounces, it shows hero pink on top and footer graphite below */
+  overscroll-behavior-y: none;
+  background: linear-gradient(var(--eraser) 50%, var(--graphite) 50%);
+  scrollbar-color: var(--graphite-4) var(--paper);
+}
+body { overscroll-behavior-y: none; }
+
+/* scrollbars: thin, rounded, in the page's own colors */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: var(--paper); }
+::-webkit-scrollbar-thumb { background: var(--graphite-4); border-radius: 999px; border: 3px solid var(--paper); }
+::-webkit-scrollbar-thumb:hover { background: var(--graphite); }
+::-webkit-scrollbar-corner { background: transparent; }
+.term ::-webkit-scrollbar, .pg ::-webkit-scrollbar { width: 10px; }
+.term ::-webkit-scrollbar-track, .pg ::-webkit-scrollbar-track { background: transparent; }
+.term ::-webkit-scrollbar-thumb, .pg ::-webkit-scrollbar-thumb { background: var(--graphite-4); border: 3px solid var(--graphite); }
+.term ::-webkit-scrollbar-thumb:hover, .pg ::-webkit-scrollbar-thumb:hover { background: var(--t-dim); }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 body {
   margin: 0;
