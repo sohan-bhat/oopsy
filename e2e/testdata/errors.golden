@@ -1,0 +1,84 @@
+$ oops explain
+oops: oops explain needs a command to check. Try: oops explain rm -rf build
+[exit 2]
+
+$ oops explain rm -rf
+Harmless. rm -rf with no path deletes nothing, so there is nothing to save.
+[exit 0]
+
+$ oops explain git reset --hard
+Destructive. Before it runs, Oopsy saves:
+  your branch position and uncommitted changes before git reset --hard in $WORK
+Anything else it changes in $WORK is caught by the project mirror too.
+[exit 0]
+
+$ oops explain ls -la
+Read only. ls -la only reads files, so Oopsy lets it run with no snapshot and no cost.
+[exit 0]
+
+$ oops lsit
+oops: oops lsit is not a command. Did you mean oops list? Run oops --help to see them all.
+[exit 2]
+
+$ oops undoo 3
+oops: oops undoo is not a command. Did you mean oops undo? Run oops --help to see them all.
+[exit 2]
+
+$ oops undo
+oops: oops undo needs the id of a snapshot (oops list shows them). Try: oops undo 12
+[exit 2]
+
+$ oops undo 99
+oops: there is no snapshot 99. oops list shows the ones you have (they are kept 7 days)
+[exit 3]
+
+$ oops undo x
+oops: "x" is not a snapshot id. oops list shows them; then run for example: oops undo 12
+[exit 2]
+
+$ oops show 7
+oops: there is no snapshot 7. oops list shows the ones you have (they are kept 7 days)
+[exit 3]
+
+$ oops --yse
+oops: oops does not have a --yse option. Did you mean --yes? Run oops --help to see its options.
+[exit 2]
+
+$ oops list extra
+oops: oops list takes no arguments, but got "extra". Run oops list --help for how to use it.
+[exit 2]
+
+$ oops restore 1
+oops: oops restore copies a snapshot into another folder, so it needs --to. Try: oops restore 1 --to ~/recovered (or oops undo 1 to restore in place)
+[exit 2]
+
+$ oops config keep_days
+oops: oops config keep_days needs a value too. Try: oops config keep_days 14, or oops config with nothing to see every setting
+[exit 2]
+
+$ oops config nope 1
+oops: "nope" is not a setting. The settings are keep_days, max_gb, free_floor_gb, quiet, store and watch_max_file_mb; oops config shows them all
+[exit 2]
+
+$ oops 
+Nothing to undo. Oopsy has no unrestored snapshots.
+Hooks are not installed yet. Run oops init to start protecting your commands.
+[exit 0]
+
+$ oops list
+No snapshots yet.
+Run oops init to install the hooks.
+[exit 0]
+
+$ oops db lsit
+oops: oops db lsit is not a command. Did you mean oops db list? Run oops db --help to see them all.
+[exit 2]
+
+$ oops db list --url postgres://u:p@127.0.0.1:1/shop
+oops: could not reach Postgres at 127.0.0.1:1: nothing is listening there. Start Postgres, or point Oopsy at the right server with --url or OOPS_DATABASE_URL
+[exit 1]
+
+$ oops db undo abc
+oops: "abc" is not a change id. oops db list shows them; then run for example: oops db undo 42
+[exit 2]
+
