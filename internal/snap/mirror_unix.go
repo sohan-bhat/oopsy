@@ -71,3 +71,6 @@ func fragileMode(m uint32) bool { return m&0o200 == 0 }
 
 // applyDirMode puts a folder's recorded permissions back.
 func applyDirMode(p string, m uint32) { _ = os.Chmod(p, os.FileMode(m)) }
+
+// setDirCreated is Windows only; Unix folders have no creation time to set.
+func setDirCreated(string, int64) {}

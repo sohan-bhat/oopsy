@@ -34,6 +34,11 @@ func listDir(dir string) ([]dirEntry, error) {
 			e.kind = 'f'
 		case kindDir:
 			e.kind = 'd'
+			// Folders have no size; keep their creation time instead, so a
+			// folder Oopsy brings back has the one it had.
+			if d := winData(fi); d != nil {
+				e.size = d.CreationTime.Nanoseconds()
+			}
 		case kindSymlink, kindJunction:
 			e.kind = 'l'
 		}
@@ -58,3 +63,12 @@ func fragileMode(m uint32) bool {
 
 // applyDirMode puts a folder's recorded attributes back.
 func applyDirMode(p string, m uint32) { setAttrs(p, m) }
+
+// setDirCreated puts back a folder's creation time recorded by listDir.
+func setDirCreated(p string, created int64) {
+	if created == 0 {
+		return
+	}
+	ct := windows.NsecToFiletime(created)
+	setTimes(p, &ct, nil, nil)
+}
