@@ -6,10 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
-	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // forceCopy disables copy on write clones (used to measure the fallback).
@@ -103,37 +99,6 @@ func plainCopy(src, dst string, fi os.FileInfo) error {
 	return out.Close()
 }
 
-func setMeta(p string, fi os.FileInfo, link bool) {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if ok {
-		_ = os.Lchown(p, int(st.Uid), int(st.Gid))
-	}
-	if !link {
-		_ = os.Chmod(p, fi.Mode().Perm()|fi.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky))
-	}
-	atime := fi.ModTime()
-	if ok {
-		atime = statAtime(st)
-	}
-	ts := []unix.Timespec{unix.NsecToTimespec(atime.UnixNano()), unix.NsecToTimespec(fi.ModTime().UnixNano())}
-	_ = unix.UtimesNanoAt(unix.AT_FDCWD, p, ts, unix.AT_SYMLINK_NOFOLLOW)
-}
-
-func setMtime(p string, mtime int64) {
-	t := time.Unix(0, mtime)
-	ts := []unix.Timespec{unix.NsecToTimespec(t.UnixNano()), unix.NsecToTimespec(t.UnixNano())}
-	_ = unix.UtimesNanoAt(unix.AT_FDCWD, p, ts, unix.AT_SYMLINK_NOFOLLOW)
-}
-
-// sameDevice reports whether two paths live on the same filesystem.
-func sameDevice(a, b string) bool {
-	var sa, sb unix.Stat_t
-	if unix.Lstat(a, &sa) != nil || unix.Stat(b, &sb) != nil {
-		return false
-	}
-	return sa.Dev == sb.Dev
-}
-
 // SameDevice reports whether two paths are on the same filesystem.
 func SameDevice(a, b string) bool { return sameDevice(a, b) }
 
@@ -155,27 +120,4 @@ func ProbeClone(dir string) string {
 		return "copy"
 	}
 	return cloneMethod
-}
-
-// fixDirTimes copies directory timestamps from src to dst. Clones and
-// copies create directories fresh, which would otherwise stamp them "now".
-func fixDirTimes(src, dst string) {
-	_ = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || !d.IsDir() {
-			return nil
-		}
-		fi, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		rel, _ := filepath.Rel(src, p)
-		target := filepath.Join(dst, rel)
-		atime := fi.ModTime()
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-			atime = statAtime(st)
-		}
-		ts := []unix.Timespec{unix.NsecToTimespec(atime.UnixNano()), unix.NsecToTimespec(fi.ModTime().UnixNano())}
-		_ = unix.UtimesNanoAt(unix.AT_FDCWD, target, ts, unix.AT_SYMLINK_NOFOLLOW)
-		return nil
-	})
 }
