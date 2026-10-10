@@ -27,7 +27,7 @@ func restoreKube(s *snap.Snapshot, r snap.Record) snap.Outcome {
 	if err != nil {
 		return fail(err.Error())
 	}
-	rep := putBack(st.Tool, dir, items, st.Mode != "delete")
+	rep := putBack(st.Tool, dir, items, st.Mode != "delete", false)
 	var parts []string
 	if st.Mode == "delete" {
 		parts = append(parts, rep.summary("recreated"))
@@ -95,7 +95,9 @@ func (r report) summary(verb string) string {
 // also puts back the saved version of objects that exist. Objects that a
 // controller owns are left to it, since recreating them by hand would
 // fight the controller.
-func putBack(t tool, dir string, items []map[string]any, replace bool) report {
+// With keepOwners the saved field owners (managedFields) go back too, so
+// tools that use server side apply, such as Helm 4, keep owning their fields.
+func putBack(t tool, dir string, items []map[string]any, replace, keepOwners bool) report {
 	var rep report
 	var cands []map[string]any
 	for _, it := range items {
@@ -120,6 +122,9 @@ func putBack(t tool, dir string, items []map[string]any, replace bool) report {
 		switch {
 		case !ok:
 			c := cleanObj(it, true)
+			if mf := metaOf(it)["managedFields"]; keepOwners && mf != nil {
+				metaOf(c)["managedFields"] = mf
+			}
 			if k := kindOf(c); k == "Namespace" || k == "CustomResourceDefinition" {
 				first = append(first, c)
 			} else {
