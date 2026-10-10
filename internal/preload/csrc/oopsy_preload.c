@@ -88,7 +88,7 @@ static const char *under_root(const char *p) {
 
 /* FNV 1a, 64 bit, the same as snap.PrewriteName in Go. */
 static uint64_t fnv(const char *s) {
-    uint64_t h = 1469598103934665603ULL;
+    uint64_t h = 14695981039346656037ULL;
     for (; *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
     return h;
 }
