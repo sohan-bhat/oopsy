@@ -75,8 +75,15 @@ func warnConfig() {
 	}
 }
 
-func undoLatest(yes bool) error {
+// finishPending completes snapshots of commands that ran without a hook
+// after them, so what oops shows is up to date.
+func finishPending() {
 	warnConfig()
+	snap.FinishPending("")
+}
+
+func undoLatest(yes bool) error {
+	finishPending()
 	s, err := snap.Latest()
 	if err != nil {
 		return err
@@ -207,6 +214,7 @@ func undoCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			finishPending()
 			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
@@ -230,7 +238,7 @@ func listCmd() *cobra.Command {
 		Short:   "Show recent snapshots, newest first",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			warnConfig()
+			finishPending()
 			list, err := snap.List()
 			if err != nil {
 				return err
@@ -293,6 +301,7 @@ func showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			finishPending()
 			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
@@ -391,6 +400,7 @@ func diffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			finishPending()
 			s, err := loadSnapshot(id)
 			if err != nil {
 				return err
@@ -541,6 +551,7 @@ func restoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			finishPending()
 			s, err := loadSnapshot(id)
 			if err != nil {
 				return err

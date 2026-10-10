@@ -15,14 +15,19 @@ import (
 
 // agentInput covers the stdin payloads of Claude Code, Codex, Gemini CLI and Cursor.
 type agentInput struct {
-	Cwd       string `json:"cwd"`
-	Command   string `json:"command"` // Cursor
-	ToolName  string `json:"tool_name"`
-	ToolInput struct {
+	Cwd            string `json:"cwd"`
+	Command        string `json:"command"` // Cursor
+	SessionID      string `json:"session_id"`
+	ConversationID string `json:"conversation_id"` // Cursor
+	ToolName       string `json:"tool_name"`
+	ToolInput      struct {
 		Command string `json:"command"`
 	} `json:"tool_input"`
 	WorkspaceRoots []string `json:"workspace_roots"`
 }
+
+// shellSources are hooks that run in a shell rather than an agent.
+var shellSources = map[string]bool{"zsh": true, "bash": true, "fish": true, "shell": true, "powershell": true, "cmd": true}
 
 // Run handles one hook call. It never fails the command it guards: every
 // error is reported and swallowed, and the exit code is always zero.
@@ -33,9 +38,9 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 		agentReply(source, "", stdout)
 	}()
-	var cmd, cwd, tool string
-	switch source {
-	case "zsh", "bash", "fish", "shell", "powershell", "cmd":
+	base, post := strings.CutSuffix(source, "-post")
+	var cmd, cwd, tool, session string
+	if shellSources[base] {
 		cmd = strings.Join(args, " ")
 		if cmd == "" {
 			// The PowerShell hook passes the line in the environment, since
@@ -46,7 +51,8 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if cwd == "" {
 			cwd, _ = os.Getwd()
 		}
-	default:
+		session = os.Getenv("OOPSY_SESSION")
+	} else {
 		b, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
 		if err != nil {
 			return 0
@@ -60,6 +66,10 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			cmd = in.Command
 		}
 		tool = in.ToolName
+		session = in.SessionID
+		if session == "" {
+			session = in.ConversationID
+		}
 		cwd = in.Cwd
 		if cwd == "" && len(in.WorkspaceRoots) > 0 {
 			cwd = in.WorkspaceRoots[0]
@@ -71,24 +81,30 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			cwd, _ = os.Getwd()
 		}
 	}
-	if cmd == "" {
+	if post {
+		afterCommand(base, session, stdout, stderr)
 		return 0
 	}
-	res := classifyFor(source, tool, cmd, cwd)
-	if !res.Destructive() {
+	if cmd == "" || readOnlyFor(base, tool, cmd) {
 		return 0
 	}
-	s, err := snap.Create(cmd, cwd, source, res.Actions)
-	if err != nil {
-		fmt.Fprintf(stderr, "%s could not save a snapshot: %s\n", ui.ErrWarn("oops:"), ui.Explain(err))
-		return 0
+	res := classifyFor(base, tool, cmd, cwd)
+	actions := append(res.Actions, lazyActions(cmd, cwd)...)
+	var s *snap.Snapshot
+	if len(actions) > 0 {
+		var err error
+		s, err = snap.Create(cmd, cwd, base, actions)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s could not save a snapshot: %s\n", ui.ErrWarn("oops:"), ui.Explain(err))
+		}
 	}
+	beforeCommand(base, cmd, cwd, session, s, stderr)
 	if s == nil {
 		return 0
 	}
 	msg := Summary(s)
 	cfg := snap.LoadConfig()
-	switch source {
+	switch base {
 	case "zsh", "bash", "fish", "shell", "powershell", "cmd":
 		if !cfg.Quiet || len(s.Skipped) > 0 {
 			fmt.Fprintln(stderr, ui.ErrDim(msg))
@@ -139,7 +155,7 @@ func agentReply(source, _ string, stdout io.Writer) {
 	switch source {
 	case "cursor":
 		fmt.Fprintln(stdout, `{"continue":true,"permission":"allow"}`)
-	case "gemini":
+	case "gemini", "gemini-post":
 		fmt.Fprintln(stdout, `{}`)
 	}
 	replied = true
