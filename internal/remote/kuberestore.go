@@ -176,9 +176,29 @@ func kubeSend(t tool, api apiCache, verb string, objs []map[string]any) (ok []ma
 			errs = append(errs, objRef(it)+": "+err.Error())
 			continue
 		}
+		if mf := metaOf(it)["managedFields"]; mf != nil && verb == "create" {
+			// The server adds kubectl as an owner of everything it created;
+			// setting the saved owners again leaves exactly those.
+			patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"managedFields": mf}})
+			args := []string{"patch", api.resource(it) + "/" + nameOf(it), "--type=merge", "--patch=" + string(patch)}
+			if ns := nsOf(it); ns != "" {
+				args = append(args, "--namespace="+ns)
+			}
+			_, _ = t.run(restoreTimeout, nil, nil, args...)
+		}
 		ok = append(ok, it)
 	}
 	return ok, errs
+}
+
+// resource names an object's type for kubectl, such as deployments.apps.
+func (c apiCache) resource(it map[string]any) string {
+	av, _ := it["apiVersion"].(string)
+	r := c[av][kindOf(it)]
+	if i := strings.LastIndex(av, "/"); i >= 0 {
+		return r.Name + "." + av[:i]
+	}
+	return r.Name
 }
 
 // apiCache maps each apiVersion to its resources, read once from the API
