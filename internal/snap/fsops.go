@@ -3,7 +3,6 @@ package snap
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -42,11 +41,14 @@ const (
 	kindOther    = "other"    // sockets, fifos, devices: no data to save
 )
 
-// treeSize walks p and returns the apparent size and the number of entries.
-// Links and junctions are counted but never followed.
+// treeSize walks p and returns the bytes its files take on disk (so a
+// sparse disk image counts what it really uses, not its length) and the
+// number of entries. Hard links are counted once; links and junctions are
+// counted but never followed.
 func treeSize(p string) (int64, int, error) {
 	var size int64
 	var n int
+	seen := map[uint64]bool{}
 	err := filepath.WalkDir(p, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if path == p {
@@ -58,9 +60,17 @@ func treeSize(p string) (int64, int, error) {
 		if d.IsDir() {
 			return nil
 		}
-		if fi, err := d.Info(); err == nil && kindOf(fi) == kindFile {
-			size += fi.Size()
+		fi, err := d.Info()
+		if err != nil || kindOf(fi) != kindFile {
+			return nil
 		}
+		if ino := inodeOf(fi); ino != 0 {
+			if seen[ino] {
+				return nil
+			}
+			seen[ino] = true
+		}
+		size += allocBytes(path, fi)
 		return nil
 	})
 	return size, n, err
@@ -174,7 +184,7 @@ func plainCopy(src, dst string, fi os.FileInfo) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if err := copySparse(in, out, fi.Size()); err != nil {
 		out.Close()
 		return err
 	}
