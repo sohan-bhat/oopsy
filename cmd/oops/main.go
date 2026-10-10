@@ -2,12 +2,13 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/sohan-bhat/oopsy/internal/cli"
 	"github.com/sohan-bhat/oopsy/internal/hooks"
+	"github.com/sohan-bhat/oopsy/internal/ui"
 )
 
 var version = "dev"
@@ -23,10 +24,8 @@ func main() {
 	}
 	root := rootCmd()
 	if err := root.Execute(); err != nil {
-		if err != errSilent {
-			fail("%v", err)
-		}
-		os.Exit(1)
+		fail("%s", ui.Explain(err))
+		os.Exit(cli.ExitCode(err))
 	}
 }
 
@@ -38,7 +37,9 @@ func rootCmd() *cobra.Command {
 		Long: `Oopsy takes an instant snapshot right before a destructive command runs
 (rm -rf, git reset --hard, DROP TABLE and friends). Type oops to get it back.
 
-Run oops init once to install the shell and agent hooks.`,
+Run oops init once to install the shell and agent hooks.
+
+` + cli.ExitCodesHelp,
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -51,14 +52,10 @@ Run oops init once to install the shell and agent hooks.`,
 	root.Flags().BoolVarP(&yes, "yes", "y", false, "restore without asking")
 	root.AddCommand(listCmd(), undoCmd(), showCmd(), diffCmd(), restoreCmd(), statusCmd(), pruneCmd(),
 		doctorCmd(), initCmd(), uninstallCmd(), shellInitCmd(), explainCmd(), configCmd(), dbCmd(), hookCmd())
-	root.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
-		fail("%v", err)
-		return errSilent
-	})
+	cli.FriendlyArgs(root)
+	root.SetFlagErrorFunc(cli.FlagError)
 	return root
 }
-
-var errSilent = fmt.Errorf("silent")
 
 func hookCmd() *cobra.Command {
 	return &cobra.Command{
