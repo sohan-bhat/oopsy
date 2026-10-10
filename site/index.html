@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Oopsy: undo for rm -rf</title>
-<meta name="description" content="Oopsy is an open source CLI that makes destructive commands undoable, for people and AI coding agents. It snapshots your files right before rm -rf, git reset --hard and overwrites, and your Postgres data before DROP TABLE. Type oops and it is back.">
+<title>Oopsy: undo almost anything in your terminal</title>
+<meta name="description" content="Oopsy is an open source CLI that makes destructive commands undoable, for people and AI coding agents. It snapshots deleted and overwritten files, git resets, branches, stashes and force pushes, plus Postgres tables, rows and columns, right before they are destroyed. Type oops and it is back.">
 <meta name="theme-color" content="#F5A7B8">
 <link rel="canonical" href="https://sohan-bhat.github.io/oopsy/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -13,16 +13,16 @@
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Oopsy">
-<meta property="og:title" content="Oopsy: undo for rm -rf">
-<meta property="og:description" content="Snapshots your files before rm -rf, git reset --hard and overwrites, and your Postgres data before DROP TABLE. Type oops and it is back.">
+<meta property="og:title" content="Oopsy: undo almost anything in your terminal">
+<meta property="og:description" content="Deleted files, overwrites, git resets, deleted branches, force pushes, dropped tables and deleted rows. Type oops and it is back.">
 <meta property="og:url" content="https://sohan-bhat.github.io/oopsy/">
 <meta property="og:image" content="https://sohan-bhat.github.io/oopsy/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Oopsy. Undo for rm -rf. A terminal shows rm -rf src, then oops restoring 3 files.">
+<meta property="og:image:alt" content="Oopsy. Undo almost anything. A terminal shows rm -rf src, then oops restoring 3 files.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Oopsy: undo for rm -rf">
-<meta name="twitter:description" content="Snapshots your files before rm -rf and your Postgres data before DROP TABLE. Type oops and it is back.">
+<meta name="twitter:title" content="Oopsy: undo almost anything in your terminal">
+<meta name="twitter:description" content="Deleted files, git resets, force pushes, dropped tables and deleted rows. Type oops and it is back.">
 <meta name="twitter:image" content="https://sohan-bhat.github.io/oopsy/og.png">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -56,8 +56,22 @@
   <div class="wrap hero__grid">
     <div class="hero__copy">
       <p class="hero__kicker">Open source CLI for macOS and Linux</p>
-      <h1 id="hero-title" class="hero__title">Undo for<br> <code>rm&nbsp;-rf</code>.</h1>
-      <p class="hero__lede">Oopsy snapshots your files the instant before <code>rm -rf</code>, <code>git reset --hard</code> or an overwrite runs, and your Postgres data before <code>DROP TABLE</code>. Whether you typed it or your AI agent did, you type <code>oops</code> and it is back.</p>
+      <h1 id="hero-title" class="hero__title">Undo almost<br> <code>anything</code>.</h1>
+      <p class="hero__lede">Oopsy takes an instant snapshot right before anything destructive runs in your terminal or your database. Whether you typed it or your AI agent did, you type <code>oops</code> and it is back.</p>
+      <ul class="undoables" aria-label="Things oops brings back">
+        <li>Deleted files and folders</li>
+        <li>Overwritten files</li>
+        <li><code>git reset --hard</code></li>
+        <li><code>git clean</code></li>
+        <li>Deleted branches</li>
+        <li>Dropped stashes</li>
+        <li>Force pushes</li>
+        <li><code>sed -i</code> edits</li>
+        <li>Dropped tables</li>
+        <li>Deleted rows</li>
+        <li>Bad <code>UPDATE</code>s</li>
+        <li>Dropped columns</li>
+      </ul>
 
       <div class="install" id="install">
         <div class="install__tabs" role="tablist" aria-label="Install method">
