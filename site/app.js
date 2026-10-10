@@ -86,7 +86,8 @@
   });
 
   /* ------------------------------------------------------------------
-   * File demo: a tiny fake project, a fake shell and a fake Oopsy
+   * File demo: a tiny fake project, a fake shell and a fake Oopsy.
+   * Output mirrors the real CLI (cmd/oops/files.go, internal/hooks/hook.go).
    * ------------------------------------------------------------------ */
   const API_COMMITTED = `export async function getUser(id) {
   return db.users.find(id);
@@ -112,6 +113,8 @@ export async function createInvoice(user, items) {
     { path: "package.json", content: `{\n  "name": "acme-app",\n  "private": true\n}` },
     { path: ".env", content: `DATABASE_URL=postgres://localhost/acme\nSTRIPE_KEY=sk_live_not_in_git`, untracked: true },
   ];
+  const CWD = "~/acme-app";
+  const HEAD = "9c41e2b";
 
   const treeEl = $("#tree");
   const outEl = $("#term-out");
@@ -121,59 +124,79 @@ export async function createInvoice(user, items) {
   const sw = $("#oopsy-switch");
   const swState = sw.querySelector(".switch__state");
 
-  let nodes, order, snapshots, oopsyOn, history, histIdx, busy, startedAt, hexSeed;
+  let nodes, order, snapshots, oopsyOn, history, histIdx, busy, nextId, hooked;
 
-  // Real Oopsy numbers snapshots 1, 2, 3... Start a little way in, like a machine that has been using it.
-  function newId() {
-    hexSeed += 1;
-    return String(hexSeed);
+  function makeNode(path, props) {
+    const name = path.split("/").pop();
+    const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    return Object.assign({
+      path, name, parent, dir: false, content: "", committed: "", untracked: false,
+      state: "present", ghostId: null, el: null,
+    }, props);
   }
 
   function initState() {
     nodes = new Map();
     order = [];
     SEED.forEach((s) => {
-      const name = s.path.split("/").pop();
-      const parent = s.path.includes("/") ? s.path.slice(0, s.path.lastIndexOf("/")) : "";
-      const n = {
-        path: s.path, name, parent, dir: !!s.dir,
-        content: s.content || "", committed: s.committed !== undefined ? s.committed : (s.content || ""),
-        untracked: !!s.untracked, state: "present", ghostId: null, el: null,
-      };
-      nodes.set(s.path, n);
+      const n = makeNode(s.path, {
+        dir: !!s.dir, content: s.content || "",
+        committed: s.committed !== undefined ? s.committed : (s.content || ""),
+        untracked: !!s.untracked,
+      });
+      nodes.set(n.path, n);
       order.push(n);
     });
     snapshots = [];
     oopsyOn = true;
+    hooked = true;
     history = [];
     histIdx = 0;
     busy = false;
-    startedAt = Date.now();
-    hexSeed = 41;
+    // Real Oopsy numbers snapshots 1, 2, 3. Start partway in, like a machine that has used it for a while.
+    nextId = 42;
   }
 
   const ICON_DIR = '<svg class="node__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h5l1.5 2h6.5v8h-13z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
   const ICON_FILE = '<svg class="node__icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9z M9.5 1.5v3h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
 
+  function nodeEl(n) {
+    const li = document.createElement("li");
+    li.className = "node" + (n.dir ? " node--dir" : "");
+    li.innerHTML =
+      `<div class="node__row">${n.dir ? ICON_DIR : ICON_FILE}<span class="node__name">${esc(n.name)}${n.dir ? "/" : ""}</span>` +
+      `<span class="node__badge" hidden>M</span><span class="node__ghost-tag"></span><span class="sr-only node__sr"></span></div>`;
+    n.el = li;
+    if (n.dir) {
+      const ul = document.createElement("ul");
+      ul.setAttribute("role", "list");
+      li.appendChild(ul);
+    }
+    return li;
+  }
+
+  function listFor(parent) {
+    return parent ? nodes.get(parent).el.querySelector("ul") : treeEl;
+  }
+
   function buildTree() {
     treeEl.textContent = "";
-    const lists = new Map([["", treeEl]]);
-    order.forEach((n) => {
-      const li = document.createElement("li");
-      li.className = "node" + (n.dir ? " node--dir" : "");
-      li.innerHTML =
-        `<div class="node__row">${n.dir ? ICON_DIR : ICON_FILE}<span class="node__name">${esc(n.name)}${n.dir ? "/" : ""}</span>` +
-        `<span class="node__badge" hidden>M</span><span class="node__ghost-tag"></span><span class="sr-only node__sr"></span></div>`;
-      n.el = li;
-      lists.get(n.parent).appendChild(li);
-      if (n.dir) {
-        const ul = document.createElement("ul");
-        ul.setAttribute("role", "list");
-        li.appendChild(ul);
-        lists.set(n.path, ul);
-      }
-    });
+    order.forEach((n) => listFor(n.parent).appendChild(nodeEl(n)));
     order.forEach(paintNode);
+  }
+
+  // Oopsy never overwrites on restore: a saved copy lands next to the file as name.oops-<id>.ext
+  function addSibling(orig, id, content) {
+    const dot = orig.name.lastIndexOf(".");
+    const base = dot > 0 ? orig.name.slice(0, dot) : orig.name;
+    const ext = dot > 0 ? orig.name.slice(dot) : "";
+    const path = (orig.parent ? orig.parent + "/" : "") + `${base}.oops-${id}${ext}`;
+    const n = makeNode(path, { content, committed: content, untracked: true });
+    nodes.set(path, n);
+    order.splice(order.indexOf(orig) + 1, 0, n);
+    orig.el.after(nodeEl(n));
+    paintNode(n);
+    return n;
   }
 
   function isDirty(n) {
@@ -184,8 +207,7 @@ export async function createInvoice(user, items) {
     const li = n.el;
     li.classList.toggle("is-ghost", n.state === "ghost");
     li.classList.toggle("is-gone", n.state === "gone");
-    const badge = li.querySelector(".node__badge");
-    badge.hidden = !isDirty(n);
+    li.querySelector(".node__badge").hidden = !isDirty(n);
     li.querySelector(".node__ghost-tag").textContent = n.ghostId ? `#${n.ghostId}` : "";
     let sr = "";
     if (n.state === "ghost") sr = `, deleted, saved in snapshot ${n.ghostId}`;
@@ -205,23 +227,34 @@ export async function createInvoice(user, items) {
   function gap() { line("", "ln--gap"); }
   function scrollOut() { outEl.scrollTop = outEl.scrollHeight; }
 
+  // Same wording as the CLI's ago() and ui.Bytes()
   function ago(ts) {
-    const s = Math.max(1, Math.round((Date.now() - ts) / 1000));
-    if (s < 60) return `${s}s ago`;
-    const m = Math.round(s / 60);
-    return `${m}m ago`;
+    const m = Math.floor((Date.now() - ts) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m} min ago`;
+    return `${Math.floor(m / 60)} h ago`;
+  }
+  function bytes(n) {
+    if (n < 1024) return `${n} B`;
+    return `${(n / 1024).toFixed(1)} KB`;
   }
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const pad = (s, w) => String(s).padEnd(w);
+  const home = (p) => `${CWD}/${p}`;
 
   /* path helpers */
   function norm(p) {
     let s = p.trim().replace(/^\.\//, "").replace(/\/+$/, "");
-    if (s.startsWith("~/acme-app/")) s = s.slice(11);
+    if (s.startsWith(CWD + "/")) s = s.slice(CWD.length + 1);
     return s;
   }
   const live = (n) => n && n.state === "present";
   const childrenOf = (dir) => order.filter((n) => n.parent === dir && live(n));
   const descendantsOf = (dir) => order.filter((n) => n.path.startsWith(dir + "/") && live(n));
+  function sizeOf(n) {
+    if (!n.dir) return n.content.length + 1;
+    return order.filter((d) => d.path.startsWith(n.path + "/") && !d.dir).reduce((a, d) => a + d.content.length + 1, 0);
+  }
 
   /* ---------------- commands ---------------- */
   const COMMANDS = {
@@ -234,7 +267,7 @@ export async function createInvoice(user, items) {
         ['echo "text" > <file>', "overwrite a file"],
         ["git status", "see what changed"],
         ["oops", "undo the last destructive command"],
-        ["oops list", "show snapshots"],
+        ["oops list", "show recent snapshots"],
         ["oops undo <id>", "restore a specific snapshot"],
         ["clear", "clear the screen"],
       ].forEach(([c, d]) => line(`<span class="hl">${esc(c.padEnd(22))}</span><span class="d">${esc(d)}</span>`));
@@ -247,7 +280,7 @@ export async function createInvoice(user, items) {
     whoami() { text("you. Or an AI agent. Oopsy does not mind which."); },
 
     ls(args) {
-      const all = args.includes("-a") || args.includes("-la") || args.includes("-al");
+      const all = args.some((a) => /^-\w*a/.test(a));
       const target = args.filter((a) => !a.startsWith("-"))[0];
       let dir = "";
       if (target) {
@@ -281,15 +314,11 @@ export async function createInvoice(user, items) {
       }
       const [, body, op, file] = m;
       const value = body.replace(/^["']|["']$/g, "");
-      const p = norm(file);
-      let n = nodes.get(p);
-      if (n && n.state === "present" && n.dir) return text(`zsh: is a directory: ${file}`, "ln--err");
-      if (!n || n.state !== "present") {
-        return text(`This demo only overwrites files that exist. Try echo "${value}" > README.md`, "ln--dim");
-      }
-      if (op === ">" ) {
-        const prev = n.content;
-        snapshot(raw, "content", [{ path: n.path, content: prev }], 1);
+      const n = nodes.get(norm(file));
+      if (live(n) && n.dir) return text(`zsh: is a directory: ${file}`, "ln--err");
+      if (!live(n)) return text(`This demo only overwrites files that exist. Try echo "${value}" > README.md`, "ln--dim");
+      if (op === ">") {
+        if (oopsyOn) snapshot(raw, [{ node: n, content: n.content, size: sizeOf(n) }], false);
         n.content = value;
       } else {
         n.content = n.content + "\n" + value;
@@ -302,14 +331,15 @@ export async function createInvoice(user, items) {
       const flags = args.filter((a) => a.startsWith("-")).join("");
       const recursive = /r|R/.test(flags);
       const targets = args.filter((a) => !a.startsWith("-"));
-      if (!targets.length) return text("usage: rm [-rf] file ...", "ln--err");
+      if (!targets.length) return text("usage: rm [-f | -i] [-dIPRrvWx] file ...", "ln--err");
 
       const hit = new Set();
       for (const t of targets) {
-        if (t === "/" || t === "/*") return text(`rm: it is dangerous to operate recursively on '/'\nrm: use --no-preserve-root to override this failsafe`, "ln--err");
-        if (t === "~" || t === "~/") {
-          line(`<span class="y">oopsy</span> <span class="d">not saved: too broad to snapshot (it contains the whole home directory)</span>`, "ln--oops");
-          return text("This is a browser demo, so your home folder lives to see another day. Try rm -rf *", "ln--dim");
+        if (t === "/" || t === "/*" || t === "~" || t === "~/") {
+          if (oopsyOn) {
+            line(`<span class="d">oops: not saved: ${esc(t.startsWith("~") ? "~" : "/")} (too broad to snapshot (it contains the whole home directory or the snapshot store))</span>`, "ln--oops");
+          }
+          return text("This is a browser demo, so that folder lives to see another day. Try rm -rf *", "ln--dim");
         }
         if (t === "." || t === ".." || t === "./") return text(`rm: "." and ".." may not be removed`, "ln--err");
         let matched = [];
@@ -328,10 +358,13 @@ export async function createInvoice(user, items) {
       }
       if (!hit.size) return;
       const victims = order.filter((n) => hit.has(n));
-      const files = victims.filter((n) => !n.dir);
       let id = null;
       if (oopsyOn) {
-        id = snapshot(raw, "delete", victims.map((n) => ({ path: n.path })), files.length);
+        const tops = victims.filter((n) => !hit.has(nodes.get(n.parent)));
+        id = snapshot(raw, tops.map((n) => ({
+          node: n, size: sizeOf(n),
+          members: victims.filter((v) => v === n || v.path.startsWith(n.path + "/")),
+        })), false);
       }
       erase(victims, id);
     },
@@ -341,32 +374,37 @@ export async function createInvoice(user, items) {
       if (sub === "status") {
         const modified = order.filter(isDirty);
         const deleted = order.filter((n) => !n.dir && !n.untracked && n.state !== "present");
+        const untracked = order.filter((n) => n.untracked && live(n) && n.name !== ".env");
         text("On branch main");
-        if (!modified.length && !deleted.length) return text("nothing to commit, working tree clean");
-        text("Changes not staged for commit:");
-        modified.forEach((n) => line(`        <span class="y">modified:   ${esc(n.path)}</span>`));
-        deleted.forEach((n) => line(`        <span class="hl">deleted:    ${esc(n.path)}</span>`));
+        if (!modified.length && !deleted.length && !untracked.length) return text("nothing to commit, working tree clean");
+        if (modified.length || deleted.length) {
+          text("Changes not staged for commit:");
+          modified.forEach((n) => line(`        <span class="y">modified:   ${esc(n.path)}</span>`));
+          deleted.forEach((n) => line(`        <span class="hl">deleted:    ${esc(n.path)}</span>`));
+        }
+        if (untracked.length) {
+          text("Untracked files:");
+          untracked.forEach((n) => line(`        <span class="hl">${esc(n.path)}</span>`));
+        }
         return;
       }
-      if (/^reset\s+--hard/.test(sub) || sub === "checkout ." || sub === "restore .") {
+      if (/^reset\s+--hard/.test(sub)) {
         const changed = order.filter(isDirty);
         const missing = order.filter((n) => !n.untracked && n.state !== "present");
-        if (changed.length && oopsyOn) {
-          snapshot("git " + sub, "content", changed.map((n) => ({ path: n.path, content: n.content })), changed.length);
+        if (oopsyOn && (changed.length || missing.length)) {
+          snapshot("git " + sub, changed.map((n) => ({ node: n, content: n.content, size: sizeOf(n) })), true);
         }
         changed.forEach((n) => { n.content = n.committed; });
-        // git brings back tracked files that were deleted
+        // git itself brings back tracked files that were deleted
         missing.forEach((n) => { n.state = "present"; n.ghostId = null; });
-        snapshots.forEach((s) => { if (s.kind === "delete" && missing.length) s.items = s.items.filter((it) => nodes.get(it.path).state !== "present"); });
         flash(changed);
         if (missing.length) restoreAnim(missing);
         order.forEach(paintNode);
-        if (sub.startsWith("reset")) text("HEAD is now at 9c41e2b Add getUser endpoint");
+        text(`HEAD is now at ${HEAD} Add getUser endpoint`);
         return;
       }
-      if (sub === "log" || sub === "log --oneline") return text("9c41e2b Add getUser endpoint\n1f0a7d3 Initial commit");
-      if (!sub) return text("usage: git <command>. This demo knows status, reset --hard and log.", "ln--dim");
-      text(`This demo only knows git status, git reset --hard and git log.`, "ln--dim");
+      if (sub === "log" || sub === "log --oneline") return text(`${HEAD} Add getUser endpoint\n1f0a7d3 Initial commit`);
+      text("This demo knows git status, git reset --hard and git log.", "ln--dim");
     },
 
     oops(args) {
@@ -376,38 +414,55 @@ export async function createInvoice(user, items) {
         return;
       }
       const sub = args[0];
-      if (!sub) return undo(latestUndoable());
-      if (sub === "list" || sub === "ls") return list();
+      if (!sub) {
+        const s = latestUndoable();
+        if (!s) return text("Nothing to undo. Oopsy has no unrestored snapshots.");
+        return confirmAndRestore(s);
+      }
+      if (sub === "list" || sub === "ls" || sub === "log") return list();
       if (sub === "undo") {
-        if (!args[1]) return undo(latestUndoable());
-        const s = snapshots.find((x) => x.id === args[1]);
-        if (!s) return text(`oops: no snapshot with id ${args[1]}. Run oops list to see them.`, "ln--err");
-        if (s.restored) return text(`oops: snapshot ${s.id} is already restored.`, "ln--dim");
-        return undo(s);
+        if (!args[1]) return text("oops: accepts 1 arg(s), received 0", "ln--err");
+        const id = args[1].replace(/^#/, "");
+        if (!/^\d+$/.test(id)) return text(`oops: "${args[1]}" is not a snapshot id (see oops list)`, "ln--err");
+        const s = snapshots.find((x) => x.id === Number(id));
+        if (!s) return text(`oops: no snapshot ${id}`, "ln--err");
+        if (s.restored) text(`Snapshot ${s.id} was already restored ${ago(s.restored)}; restoring again keeps any existing files.`, "ln--dim");
+        return confirmAndRestore(s);
       }
       if (sub === "init") {
-        line(`<span class="g">hooked</span> zsh            ~/.zshrc`);
-        line(`<span class="g">hooked</span> Claude Code    ~/.claude/settings.json`);
-        line(`<span class="g">hooked</span> Cursor         ~/.cursor/hooks.json`);
-        text("Oopsy is on. Destructive commands get snapshotted first.");
+        line(`<span class="y"><b>Setting up Oopsy</b></span>`);
+        line(`  <span class="d">exists</span> ${pad("zsh", 12)} ~/.zshrc`);
+        line(`  <span class="d">exists</span> ${pad("Claude Code", 12)} ~/.claude/settings.json`);
+        line(`  <span class="d">exists</span> ${pad("Cursor", 12)} ~/.cursor/hooks.json`);
+        gap();
+        line(`Try it: <b>oops explain rm -rf build</b> then <b>oops doctor</b>`);
         return;
       }
       if (sub === "db") return text("Try the Postgres demo further down the page.", "ln--dim");
       if (sub === "help" || sub === "--help" || sub === "-h") {
-        text("usage: oops [list | undo <id> | init | db proxy | db undo]");
+        text("Undo destructive commands, for people and AI coding agents");
+        gap();
+        text("Usage:\n  oops [command]\n\nThis demo knows: oops, oops list, oops undo <id>, oops init");
         return;
       }
-      text(`oops: unknown command "${sub}". Try oops list.`, "ln--err");
+      text(`Error: unknown command "${sub}" for "oops"`, "ln--err");
     },
 
     sudo() { text("Nice try. Oopsy would still have your back, though.", "ln--dim"); },
   };
   COMMANDS.dir = COMMANDS.ls;
 
-  function snapshot(cmd, kind, items, count) {
-    const id = newId();
-    snapshots.push({ id, cmd, kind, items, count, at: Date.now(), restored: false });
-    line(`<span class="y">oopsy</span> <span class="d">saved ${plural(count, "file")} before</span> ${esc(cmd)} <span class="d">as snapshot</span> <span class="y">${id}</span><span class="d">. Undo with</span> <span class="y">oops</span>`, "ln--oops");
+  /* What the hook prints on stderr right before the command runs:
+     oops: saved snapshot 42 (4 items, 1.1 KB). Run oops to undo. */
+  function snapshot(cmd, entries, gitRef) {
+    const id = nextId++;
+    const items = entries.reduce((a, e) => a + (e.members ? e.members.length : 1), 0);
+    const size = entries.reduce((a, e) => a + e.size, 0);
+    const parts = [];
+    if (entries.length) parts.push(`${plural(items, "item")}, ${bytes(size)}`);
+    if (gitRef) parts.push("1 git ref");
+    snapshots.push({ id, cmd, entries, gitRef, items, size, at: Date.now(), restored: null });
+    line(`<span class="y">oops:</span> <span class="d">saved snapshot ${id} (${esc(parts.join(" and ") || "nothing restorable")}). Run</span> <span class="y">oops</span> <span class="d">to undo.</span>`, "ln--oops");
     return id;
   }
 
@@ -416,27 +471,71 @@ export async function createInvoice(user, items) {
     return null;
   }
 
-  function undo(s) {
-    if (!s) return text("Nothing to undo. Oopsy has not had to save anything yet.", "ln--dim");
-    s.restored = true;
-    if (s.kind === "delete") {
-      const back = s.items.map((it) => nodes.get(it.path)).filter((n) => n.state === "ghost");
-      back.forEach((n) => { n.state = "present"; n.ghostId = null; });
-      restoreAnim(back);
-    } else {
-      const back = s.items.map((it) => { const n = nodes.get(it.path); n.content = it.content; return n; });
-      restoreAnim(back.filter((n) => n.state === "present"));
-    }
-    order.forEach(paintNode);
-    line(`<span class="g">restored</span> ${plural(s.count, "file")} from snapshot <span class="y">${s.id}</span> <span class="d">(${esc(s.cmd)}, ${ago(s.at)})</span>`, "ln--ok");
+  // Mirrors confirmAndRestore() in cmd/oops/files.go, including the y/N prompt.
+  function confirmAndRestore(s) {
+    line(`<span class="y"><b>Snapshot ${s.id}</b></span>  <span class="d">${ago(s.at)}  from zsh</span>`);
+    line(`  <span class="d">$</span> ${esc(s.cmd)}`);
+    line(`  <span class="d">in</span> ${CWD}`);
+    gap();
+    if (!s.entries.length && !s.gitRef) { text("This snapshot has nothing that can be restored."); return; }
+    text("This will bring back:");
+    const rows = s.entries.map((e) => {
+      const p = home(e.node.path);
+      const what = e.node.dir ? `folder, ${e.members.length - 1} items, ${bytes(e.size)}` : `file, ${bytes(e.size)}`;
+      return { p, what, exists: live(e.node) };
+    });
+    if (s.gitRef) rows.push({ p: CWD, what: `move HEAD back to ${HEAD} if it was moved by the reset`, exists: false });
+    const w = Math.max(...rows.map((r) => r.p.length));
+    rows.forEach((r) => line(`  ${esc(pad(r.p, w))}  <span class="d">${esc(r.what)}</span>${r.exists ? '  <span class="y">(exists now, both copies are kept)</span>' : ""}`));
+    gap();
+    const ask = line(`Restore it? <span class="d">[y/N]</span> `);
+    busy = true;
     updateChips();
+    setTimeout(() => {
+      ask.insertAdjacentHTML("beforeend", "y");
+      restore(s);
+      busy = false;
+      updateChips();
+      scrollOut();
+      input.focus({ preventScroll: true });
+    }, reduceMotion ? 0 : 420);
   }
 
+  function restore(s) {
+    const back = [];
+    let same = 0;
+    s.entries.forEach((e) => {
+      const p = home(e.node.path);
+      if (e.node.state === "ghost" && e.node.ghostId === s.id) {
+        e.members.forEach((m) => { if (m.state === "ghost") { m.state = "present"; m.ghostId = null; back.push(m); } });
+        line(`  <span class="g">restored</span> ${esc(p)}`);
+      } else if (!live(e.node)) {
+        e.members.forEach((m) => { m.state = "present"; m.ghostId = null; back.push(m); });
+        line(`  <span class="g">restored</span> ${esc(p)}`);
+      } else if (!e.node.dir && e.content !== undefined && e.content !== e.node.content) {
+        const copy = addSibling(e.node, s.id, e.content);
+        back.push(copy);
+        line(`  <span class="y">kept both</span> ${esc(p)} exists, saved copy put at ${esc(home(copy.path))}`);
+      } else {
+        same += e.members ? e.members.filter((m) => !m.dir).length : 1;
+      }
+    });
+    if (s.gitRef) line(`  <span class="g">git</span> HEAD was not moved, nothing to do`);
+    if (same) line(`  <span class="d">${plural(same, "file")} already matched and were left alone</span>`);
+    restoreAnim(back);
+    order.forEach(paintNode);
+    s.restored = Date.now();
+    line(`<span class="g">Restored snapshot ${s.id}.</span>`);
+  }
+
+  // Mirrors `oops list`: ID, WHEN, FROM, SIZE, COMMAND
   function list() {
-    if (!snapshots.length) return text("No snapshots yet. Oopsy saves one the moment something destructive runs.", "ln--dim");
-    line(`<span class="d">${"ID".padEnd(7)}${"WHEN".padEnd(10)}${"FILES".padEnd(7)}COMMAND</span>`);
+    if (!snapshots.length) return text("No snapshots yet.");
+    line(`<span class="d">${pad("ID", 4)}  ${pad("WHEN", 11)}  ${pad("FROM", 11)}  ${pad("SIZE", 9)}  COMMAND</span>`);
     [...snapshots].reverse().forEach((s) => {
-      line(`<span class="y">${s.id.padEnd(7)}</span>${esc(ago(s.at).padEnd(10))}${String(s.count).padEnd(7)}${esc(s.cmd)}${s.restored ? ' <span class="d">(restored)</span>' : ""}`);
+      const id = `<span class="${s.restored ? "d" : "y"}">${pad(s.id, 4)}</span>`;
+      const size = !s.entries.length && s.gitRef ? "git" : bytes(s.size);
+      line(`${id}  ${esc(pad(ago(s.at), 11))}  ${pad("zsh", 11)}  ${esc(pad(size, 9))}  ${esc(s.cmd)}${s.restored ? ' <span class="d">(restored)</span>' : ""}`);
     });
   }
 
@@ -497,6 +596,7 @@ export async function createInvoice(user, items) {
       histIdx = history.length;
       const parts = cmd.split(/\s*(?:&&|;)\s*/).filter(Boolean);
       for (const part of parts) {
+        if (busy) break;
         const [name, ...args] = tokenize(part);
         const fn = COMMANDS[name];
         if (fn) fn(args, part);
@@ -630,7 +730,9 @@ export async function createInvoice(user, items) {
   resetDemo();
 
   /* ------------------------------------------------------------------
-   * Postgres demo
+   * Postgres demo. The proxy logs "snapshot before DROP TABLE on public.users"
+   * (internal/pgproxy/proxy.go) and oops db undo describes the change
+   * the way internal/pgproxy/undo.go does.
    * ------------------------------------------------------------------ */
   const ROWS = [
     { id: 1, email: "ada@acme.dev", plan: "pro" },
@@ -664,17 +766,15 @@ export async function createInvoice(user, items) {
       });
     }
     dbTable.classList.toggle("is-dropped", !db.exists);
+    const thead = dbTable.querySelector("thead");
     if (!db.exists) {
       dbEmpty.hidden = false;
       dbEmpty.textContent = 'relation "users" does not exist';
-      dbTable.querySelector("thead").setAttribute("aria-hidden", "true");
-    } else if (!db.rows.length) {
-      dbEmpty.hidden = false;
-      dbEmpty.textContent = "0 rows";
-      dbTable.querySelector("thead").removeAttribute("aria-hidden");
+      thead.setAttribute("aria-hidden", "true");
     } else {
-      dbEmpty.hidden = true;
-      dbTable.querySelector("thead").removeAttribute("aria-hidden");
+      dbEmpty.hidden = db.rows.length > 0;
+      dbEmpty.textContent = "(0 rows)";
+      thead.removeAttribute("aria-hidden");
     }
   }
 
@@ -684,32 +784,31 @@ export async function createInvoice(user, items) {
     return wait(400 + trs.length * 60);
   }
 
-  function dbSnap(stmt, rows, kind) {
+  function dbSnap(stmt, kind, describe) {
     dbSeq += 1;
-    const id = `db${dbSeq}`;
-    dbSnaps.push({ id, stmt, kind, rows: rows.map((r) => ({ ...r })), existed: db.exists, at: Date.now(), restored: false });
-    return id;
+    dbSnaps.push({ id: dbSeq, stmt, kind, describe, rows: db.rows.map((r) => ({ ...r })), at: Date.now(), restored: false });
+    dbLine(`<span class="y">oops db proxy</span> <span class="d">snapshot before ${esc(kind)} on public.users</span>`, "ln--proxy");
   }
 
+  const NO_TABLE = 'ERROR:  relation "users" does not exist';
   const DB_CMDS = {
     "SELECT * FROM users;": async () => {
-      if (!db.exists) return dbLine('ERROR:  relation "users" does not exist', "ln--err");
+      if (!db.exists) return dbLine(NO_TABLE, "ln--err");
       dbLine(`(${plural(db.rows.length, "row")})`);
     },
     "UPDATE users SET plan = 'free';": async (s) => {
-      if (!db.exists) return dbLine('ERROR:  relation "users" does not exist', "ln--err");
-      const id = dbSnap(s, db.rows, "update");
-      dbLine(`oopsy proxy  saved ${plural(db.rows.length, "row")} of users before UPDATE as ${id}`, "ln--proxy");
+      if (!db.exists) return dbLine(NO_TABLE, "ln--err");
+      const n = db.rows.length;
+      dbSnap(s, "UPDATE", `restore the old values of ${n} rows in public.users`);
       db.rows = db.rows.map((r) => ({ ...r, plan: "free" }));
       dbRender();
       Array.from(dbRowsEl.querySelectorAll("td:last-child")).forEach((td) => td.classList.add("is-changed"));
-      dbLine(`UPDATE ${db.rows.length}`);
+      dbLine(`UPDATE ${n}`);
     },
     "DELETE FROM users;": async (s) => {
-      if (!db.exists) return dbLine('ERROR:  relation "users" does not exist', "ln--err");
-      const id = dbSnap(s, db.rows, "delete");
-      dbLine(`oopsy proxy  saved ${plural(db.rows.length, "row")} of users before DELETE as ${id}`, "ln--proxy");
+      if (!db.exists) return dbLine(NO_TABLE, "ln--err");
       const n = db.rows.length;
+      dbSnap(s, "DELETE", `put back ${n} rows into public.users`);
       await dbEraseRows();
       db.rows = [];
       dbRender();
@@ -717,8 +816,7 @@ export async function createInvoice(user, items) {
     },
     "DROP TABLE users;": async (s) => {
       if (!db.exists) return dbLine('ERROR:  table "users" does not exist', "ln--err");
-      const id = dbSnap(s, db.rows, "drop");
-      dbLine(`oopsy proxy  saved table users (${plural(db.rows.length, "row")}, schema) before DROP as ${id}`, "ln--proxy");
+      dbSnap(s, "DROP TABLE", `recreate table public.users with ${db.rows.length} rows, its indexes and constraints`);
       await dbEraseRows();
       db.exists = false;
       db.rows = [];
@@ -728,12 +826,15 @@ export async function createInvoice(user, items) {
     "oops db undo": async () => {
       let s = null;
       for (let i = dbSnaps.length - 1; i >= 0; i--) if (!dbSnaps[i].restored) { s = dbSnaps[i]; break; }
-      if (!s) return dbLine("Nothing to undo. The proxy has not had to save anything yet.", "ln--dim");
+      if (!s) return dbLine("Nothing to undo. The proxy has not saved any changes yet.", "ln--dim");
       s.restored = true;
+      dbLine(`<span class="y"><b>Change ${s.id}</b></span>  <span class="d">${ago(s.at)}</span>`);
+      dbLine(`  <span class="d">${esc(s.stmt)}</span>`);
+      dbLine(`  <span class="g">${esc(s.describe)}</span>`);
       db.exists = true;
       db.rows = s.rows.map((r) => ({ ...r }));
       dbRender("restore");
-      dbLine(`<span class="g">restored</span> users, ${plural(s.rows.length, "row")}, from <span class="y">${s.id}</span> <span class="d">(${esc(s.stmt.replace(/;$/, ""))}, ${ago(s.at)})</span>`, "ln--ok");
+      dbLine(`<span class="g">Restored change ${s.id}.</span>`);
     },
   };
 
@@ -779,7 +880,7 @@ export async function createInvoice(user, items) {
     dbBusy = false;
     dbSeq = 0;
     dbOut.textContent = "";
-    dbLine(`<span class="d"># Your app talks to Postgres through oopsy db proxy.</span>`);
+    dbLine(`<span class="d"># psql talks to Postgres through oops db proxy.</span>`);
     dbLine(`<span class="d"># Run something you will regret.</span>`);
     dbRender();
     dbUpdateChips();
