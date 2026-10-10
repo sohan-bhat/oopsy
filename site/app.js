@@ -488,13 +488,13 @@ export async function createInvoice(user, items) {
   /* chips */
   const CHIPS = [
     { cmd: "ls" },
-    { cmd: "cat src/api.ts" },
     { cmd: "rm -rf src", danger: true },
+    { cmd: "oops", hero: true },
     { cmd: "git reset --hard", danger: true },
+    { cmd: "oops list" },
+    { cmd: "cat src/api.ts" },
     { cmd: 'echo "hi" > README.md', danger: true },
     { cmd: "rm -rf *", danger: true },
-    { cmd: "oops", hero: true },
-    { cmd: "oops list" },
     { cmd: "help" },
   ];
   const chipEls = CHIPS.map((c) => {
