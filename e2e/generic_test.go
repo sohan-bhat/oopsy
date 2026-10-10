@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,7 @@ func (e *env) generic(t *testing.T, dir, cmd string) string {
 	_, pre, _ := d.oopsCmd("", "hook", "zsh", "--", cmd)
 	c := exec.Command(posixShell(), "-c", cmd)
 	c.Dir = dir
-	c.Env = e.environ()
+	c.Env = append(e.environ(), e.preloadEnv(t)...)
 	out, err := c.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s: %v\n%s", cmd, err, out)
@@ -131,13 +132,27 @@ func TestGenericUnknownScript(t *testing.T) {
 	}
 	got := without(snapshotTree(t, root, false), ".git")
 	main := filepath.Join("src", "main.c")
-	if inPlaceLost(e) {
+	if inPlaceLost(e) && runtime.GOOS != "linux" {
 		// Hard link mirrors cannot keep a file rewritten in place; that is
 		// covered by the preload library and by watch mode instead.
 		delete(before, main)
 		delete(got, main)
 	}
 	compareTrees(t, before, got)
+}
+
+// preloadEnv installs the Linux preload library the way shell-init does and
+// returns the environment that loads it.
+func (e *env) preloadEnv(t *testing.T) []string {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	e.mustOops("shell-init", "bash")
+	lib := filepath.Join(e.oops, "lib", "liboopsy_preload.so")
+	if _, err := os.Stat(lib); err != nil {
+		t.Fatalf("shell-init did not install the preload library: %v", err)
+	}
+	return []string{"LD_PRELOAD=" + lib}
 }
 
 // inPlaceLost reports a mirror that uses hard links (NTFS, ext4).
@@ -155,4 +170,31 @@ func without(m map[string]node, prefix string) map[string]node {
 		out[k] = v
 	}
 	return out
+}
+
+// A program nobody knows rewrites a file in place. APFS, btrfs, XFS and
+// ReFS mirrors keep the old blocks by themselves; on ext4 the preload
+// library copies the file before its first write.
+func TestGenericInPlaceOverwrite(t *testing.T) {
+	py := "python3"
+	if _, err := exec.LookPath(py); err != nil {
+		py = "python"
+		needTool(t, py)
+	}
+	e := newEnv(t)
+	root := e.project(t)
+	e.mustOops("mirror", "build", root)
+	if inPlaceLost(e) && runtime.GOOS != "linux" {
+		t.Skip("hard link mirror without a preload library: covered by oops watch instead")
+	}
+	before := without(snapshotTree(t, root, false), ".git")
+	e.generic(t, root, py+` -c "f = open('src/util.c', 'r+'); f.seek(0); f.write('XXXX'); f.close(); open('notes.md', 'w').write('gone')"`)
+	if b, _ := os.ReadFile(filepath.Join(root, "notes.md")); string(b) != "gone" {
+		t.Fatal("the program did not run")
+	}
+	out := e.inDir(root).mustOops("-y")
+	if strings.Contains(out, "not saved") {
+		t.Fatalf("something was not saved:\n%s", out)
+	}
+	compareTrees(t, before, without(snapshotTree(t, root, false), ".git"))
 }
