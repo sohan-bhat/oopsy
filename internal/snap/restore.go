@@ -94,7 +94,7 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 			// kept inside the snapshot, never thrown away.
 			if err := s.setAside(e.Orig); err == nil {
 				if err := pl.place(src, e.Orig); err != nil {
-					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
+					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: ui.Explain(err)})
 				} else {
 					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
 				}
