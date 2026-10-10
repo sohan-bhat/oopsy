@@ -51,7 +51,7 @@ Run oops init once to install the shell and agent hooks.
 	root.SetVersionTemplate("oops {{.Version}}\n")
 	root.Flags().BoolVarP(&yes, "yes", "y", false, "restore without asking")
 	root.AddCommand(listCmd(), undoCmd(), showCmd(), diffCmd(), restoreCmd(), statusCmd(), pruneCmd(),
-		doctorCmd(), initCmd(), uninstallCmd(), shellInitCmd(), explainCmd(), configCmd(), dbCmd(), hookCmd(), mirrorCmd())
+		doctorCmd(), initCmd(), uninstallCmd(), shellInitCmd(), explainCmd(), configCmd(), dbCmd(), hookCmd(), mirrorCmd(), watchCmd())
 	cli.FriendlyArgs(root)
 	root.SetFlagErrorFunc(cli.FlagError)
 	return root
