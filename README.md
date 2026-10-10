@@ -88,6 +88,7 @@ For Postgres, run your app or agent through the proxy:
 oops db wrap -- npm run dev          # or: oops db proxy --upstream postgres://...
 oops db list
 oops db undo
+oops db protect --url postgres://... # optional: also catch changes that skip the proxy
 ```
 
 ## How it works
@@ -121,7 +122,13 @@ Infrastructure commands get their state saved first, by the tool itself, with a 
 
 Restores never overwrite newer work: if something exists at the path again, both copies are kept.
 
-The Postgres proxy speaks the wire protocol and parses every statement. Before a `DELETE`, `UPDATE`, `TRUNCATE`, `DROP TABLE`, `DROP SCHEMA` or `ALTER TABLE ... DROP COLUMN` it copies exactly the affected rows, tables or column into an `oops` schema inside the same transaction, so a rollback discards the snapshot too.
+The Postgres proxy speaks the wire protocol and parses every statement. Before a `DELETE`, `UPDATE`, `TRUNCATE`, `DROP TABLE`, `DROP SCHEMA` or `ALTER TABLE ... DROP COLUMN` it copies exactly the affected rows, tables or column into an `oops` schema inside the same transaction, so a rollback discards the snapshot too. It also saves:
+
+* the definitions of views, materialized views, functions and procedures before `DROP VIEW`, `DROP MATERIALIZED VIEW` or `DROP FUNCTION`, with their grants, comments, indexes and dependent views. Undo recreates them; a materialized view that held data is refreshed from its tables.
+* the rows an upsert (`INSERT ... ON CONFLICT DO UPDATE`) is about to overwrite. Undo puts their old values back and removes rows it inserted fresh, while they still hold what the upsert wrote.
+* a compressed `pg_dump` of the whole database before `DROP DATABASE`, kept in `~/.oops/db`, under the same free space floor as file copies. In tests a dump was about 12% of the database's size. `oops db undo` recreates the database with `pg_restore`. If there is no room or no `pg_dump`, the drop still runs and the client gets a warning saying why.
+
+For changes that do not go through the proxy, `oops db protect` (optional, needs a superuser) installs triggers in the database: row triggers keep the old rows of every `DELETE`, `UPDATE` and `TRUNCATE`, and event triggers save tables, views and functions before they are dropped. Each transaction becomes one undo, kept 7 days. It costs about 115 bytes per changed row in bulk statements and about 550 bytes for a single row statement, and slows writes by about 2 times in bulk and 3 to 7 times for single row statements. It does not reverse `INSERT`, `COPY`, `ALTER` or `DROP DATABASE`, or drops run from inside a function. `oops db unprotect` removes the triggers and keeps what they saved.
 
 ## What it does not catch
 
@@ -131,7 +138,7 @@ The Postgres proxy speaks the wire protocol and parses every statement. Before a
 * Other machines: commands run over `ssh` or `rsync` to another host change another computer, so undo there needs Oopsy installed there too.
 * Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, objects or disks inside cloud resources.
 * File edits made by an editor or by an agent's own edit tool rather than the shell.
-* Database changes that do not go through the proxy, plus `DROP DATABASE`, `DROP INDEX`, `DROP VIEW`, deletes inside functions or triggers, and upserts. Grants and row level security policies are not restored. An `UPDATE` on a table without a primary key is undone by restoring the whole table.
+* Database changes that skip the proxy when `oops db protect` is off. With it on, inserts, `ALTER` statements and drops run from inside a function are still not reversed. `DROP INDEX` is not saved, nor row level security policies, and an `UPDATE` on a table without a primary key is undone by restoring the whole table.
 * Overwrites on a disk without copy on write (NTFS, ext4) when the copy would leave less than the free space floor: Oopsy skips that copy and tells you.
 * Undoing `git push --force` needs the old commit in your local repo, which it is if you fetched before pushing.
 
