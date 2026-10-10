@@ -96,11 +96,14 @@ are set up unless you pass --all or --only. Every file is backed up to
 			fmt.Println()
 			if len(shells) > 0 {
 				if runtime.GOOS == "windows" {
-					fmt.Println("Open a new PowerShell or Git Bash window so it picks up the hook.")
+					fmt.Println("Open a new PowerShell, Git Bash or cmd window so it picks up the hook.")
 				} else {
 					sh := filepath.Base(os.Getenv("SHELL"))
 					fmt.Printf("Open a new terminal (or run %s) so your shell picks up the hook.\n", ui.Bold("exec "+sh))
 				}
+			}
+			if slices.Contains(shells, "cmd") {
+				fmt.Println(hooks.CmdCoverage())
 			}
 			if hint := executionPolicyHint(); hint != "" && slices.ContainsFunc(shells, isPowerShell) {
 				fmt.Println(ui.Warn(hint))
@@ -112,7 +115,7 @@ are set up unless you pass --all or --only. Every file is backed up to
 			return nil
 		},
 	}
-	c.Flags().StringSliceVar(&only, "only", nil, "only these targets: zsh, bash, fish, powershell, windowspowershell, claude, codex, cursor, gemini, shells, agents")
+	c.Flags().StringSliceVar(&only, "only", nil, "only these targets: zsh, bash, fish, powershell, windowspowershell, cmd, claude, codex, cursor, gemini, shells, agents")
 	c.Flags().BoolVar(&all, "all", false, "set up every target, even ones not detected")
 	return c
 }
