@@ -65,9 +65,14 @@ func (m *Mirror) preWriteBackup(rel string, old node) string {
 }
 
 // addBackupEntry moves a pre write copy into the snapshot.
-func (m *Mirror) addBackupEntry(s *Snapshot, c node, backup string, k *int) {
+func (m *Mirror) addBackupEntry(s *Snapshot, c, old node, parentTime int64, backup string, k *int) {
 	orig := m.origPath(c.rel)
-	e := Entry{Orig: orig, Store: filepath.Join("files", fmt.Sprintf("m%d", *k)), Type: "file", Method: "copy", Files: 1, Generic: true, After: &Stamp{Size: c.size, Mtime: c.mtime}}
+	// The copy was written by the preload library as a private file; give
+	// it the original's permissions and time back.
+	applyDirMode(backup, old.mode)
+	setMtime(backup, old.mtime)
+	e := Entry{Orig: orig, Store: filepath.Join("files", fmt.Sprintf("m%d", *k)), Type: "file", Method: "copy", Files: 1, Generic: true,
+		After: &Stamp{Size: c.size, Mtime: c.mtime}, ParentMtime: parentTime}
 	target := s.EntryPath(e)
 	if err := os.Rename(backup, target); err != nil {
 		if _, err := copyTree(backup, target, plainCopy); err != nil {

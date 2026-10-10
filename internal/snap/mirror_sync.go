@@ -322,7 +322,7 @@ func (m *Mirror) attribute(p *Pending, old, removed, changed []node, res *SyncRe
 			// command replaced the file and the link kept the old one.
 			if st := StampOf(m.dataPath(c.rel)); st == nil || *st != o.stamp() {
 				if bk := m.preWriteBackup(c.rel, o); bk != "" {
-					m.addBackupEntry(s, c, bk, &k)
+					m.addBackupEntry(s, c, o, parentMtime(old, c.rel, m.Root), bk, &k)
 					continue
 				}
 				if !covered(m.origPath(c.rel)) {
