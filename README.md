@@ -147,10 +147,12 @@ Measured on GitHub's CI runners for a 10,000 file repository (the numbers in eac
 
 | | macOS (APFS clones) | Linux (ext4 hard links) | Windows (NTFS hard links) |
 |---|---|---|---|
-| Mirror metadata per file | about 270 to 530 bytes, plus 40 bytes of index | about 270 bytes, plus 40 bytes of index | about 60 to 200 bytes, plus 40 bytes of index |
-| Added before a command | about 25 ms | about 22 ms | about 15 ms with the change journal, 50 to 85 ms when it has to walk |
+| Mirror metadata per file | about 270 to 530 bytes, plus 40 bytes of index | about 270 bytes, plus 40 bytes of index | a directory entry (too small to read from free space on the runner), plus 40 bytes of index |
+| Time added before a command | about 25 ms | about 22 ms | about 36 ms when the change journal says nothing changed (7 ms of that is just starting a process there), 50 to 85 ms when it has to walk |
 | Read only lines | nothing, skipped in the shell | nothing | nothing |
 | `oops watch` memory, three 10,000 file projects | 24 to 33 MB | 19 to 24 MB | 16 to 17 MB |
+
+The step after a command runs in the background at your next prompt, so it adds no wait.
 
 An undo costs only what it saves: a deleted file or folder costs nothing extra on any of these disks (clones and hard links), an agent edit a few hundred bytes to a few KB, Kubernetes objects about 1 KB each, Terraform state a few KB, a view definition under 1 KB, and a `DROP DATABASE` dump about 12% of the database.
 
