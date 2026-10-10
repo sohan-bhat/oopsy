@@ -436,6 +436,8 @@ func (ps *psState) command(toks []psTok, input *psInput, piped bool) *psInput {
 				ps.actions = append(ps.actions, c.actions...)
 			}
 		}
+	default:
+		ps.native(name, rest)
 	}
 	if piped {
 		return &psInput{}
