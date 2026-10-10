@@ -129,17 +129,17 @@ func makeTree(t *testing.T, root string) {
 	big := make([]byte, 5<<20)
 	rand.Read(big)
 	files := map[string][]byte{
-		"README.md":              []byte("# project\n"),
-		".env":                   []byte("SECRET=hunter2\n"),
-		".gitignore":             []byte("node_modules\n"),
-		"src/main.go":            []byte("package main\n"),
-		"src/util/strings.go":    []byte("package util\n"),
-		"data/big.bin":           big,
-		"data/empty":             {},
-		"weird name with spaces": []byte("spaces\n"),
-		"unicodé/файл.txt":       []byte("unicode\n"),
+		"README.md":               []byte("# project\n"),
+		".env":                    []byte("SECRET=hunter2\n"),
+		".gitignore":              []byte("node_modules\n"),
+		"src/main.go":             []byte("package main\n"),
+		"src/util/strings.go":     []byte("package util\n"),
+		"data/big.bin":            big,
+		"data/empty":              {},
+		"weird name with spaces":  []byte("spaces\n"),
+		"unicodé/файл.txt":        []byte("unicode\n"),
 		"node_modules/x/index.js": []byte("module.exports = 1\n"),
-		"deep/a/b/c/d/e/f.txt":   []byte("deep\n"),
+		"deep/a/b/c/d/e/f.txt":    []byte("deep\n"),
 	}
 	for name, data := range files {
 		p := filepath.Join(root, name)

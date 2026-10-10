@@ -652,4 +652,3 @@ func (p *Proxy) logPlan(sp StmtPlan) {
 		p.OnChange(sp)
 	}
 }
-
