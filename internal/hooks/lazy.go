@@ -244,3 +244,8 @@ func lazyActions(cmd, cwd string) []classify.Action {
 	}
 	return []classify.Action{{Program: "rebuildable", Paths: targets, Delete: true, Rebuildable: true}}
 }
+
+// LazyTargets lists the rebuildable folders a command would get saved whole.
+func LazyTargets(cmd, cwd string) []string {
+	return lazyTargets(cmd, cwd, snap.MirrorRoot(cwd))
+}

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/sohan-bhat/oopsy/internal/classify"
+	"github.com/sohan-bhat/oopsy/internal/hooks"
+	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
 )
 
@@ -20,7 +22,7 @@ func explainLine(w io.Writer, line, cwd string) {
 		return
 	}
 	if classify.ReadOnly(line) {
-		fmt.Fprintf(w, "%s %s only reads files, so Oopsy lets it run with no snapshot.\n", ui.Good("Read only."), ui.Bold(line))
+		fmt.Fprintf(w, "%s %s only reads files, so Oopsy lets it run with no snapshot and no cost.\n", ui.Good("Read only."), ui.Bold(line))
 		return
 	}
 	if why := deletesNothing(line); why != "" {
@@ -28,17 +30,51 @@ func explainLine(w io.Writer, line, cwd string) {
 		return
 	}
 	res := classify.Classify(line, cwd, os.Environ())
-	if !res.Destructive() {
-		fmt.Fprintf(w, "%s Oopsy does not see anything in %s that deletes or overwrites files, git state or data, so it lets it run without a snapshot. Programs that delete files themselves, like make clean or a script, are not visible from the command line.\n",
-			ui.Good("Nothing to save."), ui.Bold(line))
-		return
-	}
-	fmt.Fprintln(w, ui.Warn("Destructive.")+" Before it runs, Oopsy saves:")
-	for _, a := range res.Actions {
-		for _, l := range describeAction(a, line) {
-			fmt.Fprintf(w, "  %s\n", l)
+	lazy := hooks.LazyTargets(line, cwd)
+	if res.Destructive() || len(lazy) > 0 {
+		fmt.Fprintln(w, ui.Warn("Destructive.")+" Before it runs, Oopsy saves:")
+		for _, a := range res.Actions {
+			for _, l := range describeAction(a, line) {
+				fmt.Fprintf(w, "  %s\n", l)
+			}
+		}
+		for _, p := range lazy {
+			if namedBy(res.Actions, p) {
+				continue
+			}
+			fmt.Fprintf(w, "  %s, whole, since the command or its script names it (rebuildable, kept one day)\n", ui.HomeRel(p))
 		}
 	}
+	root := snap.MirrorRoot(cwd)
+	switch {
+	case root == "":
+		fmt.Fprintf(w, "%s is too broad to mirror (a home folder, a disk root or a system folder), so only what the command names is saved.\n", ui.HomeRel(cwd))
+	case res.Destructive():
+		fmt.Fprintf(w, "Anything else it changes in %s is caught by the project mirror too.\n", ui.HomeRel(root))
+	default:
+		fmt.Fprintf(w, "%s Oopsy does not know what %s does, so it relies on the project mirror of %s: whatever the command changes or deletes there is saved as it happens, and %s brings it back.\n",
+			ui.Warn("Unknown command."), ui.Bold(firstWord(line)), ui.HomeRel(root), ui.Bold("oops"))
+	}
+}
+
+// namedBy reports a path the classifier already saves.
+func namedBy(actions []classify.Action, p string) bool {
+	for _, a := range actions {
+		for _, q := range a.Paths {
+			if q == p {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func firstWord(line string) string {
+	f := strings.Fields(line)
+	if len(f) == 0 {
+		return line
+	}
+	return f[0]
 }
 
 // deletesNothing explains delete commands with nothing to delete.

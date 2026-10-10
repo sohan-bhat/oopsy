@@ -9,10 +9,11 @@ Harmless. rm -rf with no path deletes nothing, so there is nothing to save.
 $ oops explain git reset --hard
 Destructive. Before it runs, Oopsy saves:
   your branch position and uncommitted changes before git reset --hard in $WORK
+Anything else it changes in $WORK is caught by the project mirror too.
 [exit 0]
 
 $ oops explain ls -la
-Read only. ls -la only reads files, so Oopsy lets it run with no snapshot.
+Read only. ls -la only reads files, so Oopsy lets it run with no snapshot and no cost.
 [exit 0]
 
 $ oops lsit
