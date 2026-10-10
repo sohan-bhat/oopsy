@@ -30,7 +30,7 @@ func Explain(err error) string {
 	case diskFull(err):
 		return fmt.Sprintf("the disk holding %s is full; free up some space and run it again", shown)
 	case readOnly(err):
-		return fmt.Sprintf("%s is on a read-only disk, so it cannot be changed", shown)
+		return fmt.Sprintf("%s is on a disk that is mounted read only, so it cannot be changed", shown)
 	}
 	return err.Error()
 }
