@@ -2,8 +2,8 @@
 #   irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
 # Installs oops.exe and oops-db.exe into %LOCALAPPDATA%\Programs\oopsy and
 # adds that folder to your user PATH. Works in Windows PowerShell 5.1 and
-# PowerShell 7. Set $env:OOPSY_VERSION = 'v0.2.0' to pick a version and
-# $env:OOPSY_INSTALL_DIR to pick a folder.
+# PowerShell 7. Pin a version first with $env:OOPS_VERSION = '0.2.0', and
+# pick a folder with $env:OOPSY_INSTALL_DIR.
 
 function Install-Oopsy {
   $ErrorActionPreference = 'Stop'
@@ -22,8 +22,11 @@ function Install-Oopsy {
     default { throw "oopsy install: unsupported CPU: $arch" }
   }
 
-  $version = $env:OOPSY_VERSION
-  if (-not $version) {
+  $version = $env:OOPS_VERSION
+  if (-not $version) { $version = $env:OOPSY_VERSION }
+  if ($version) {
+    $version = 'v' + $version.TrimStart('v')
+  } else {
     $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'oopsy-install' }).tag_name
     if (-not $version) { throw 'oopsy install: could not find the latest release' }
   }

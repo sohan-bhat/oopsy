@@ -1,7 +1,9 @@
 #!/bin/sh
 # Oopsy installer: curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | sh
 # Installs oops and oops-db into /usr/local/bin when writable, else ~/.local/bin.
-# Set OOPSY_VERSION=v0.2.0 to pick a version, OOPSY_BIN_DIR to pick a directory.
+# Pin a version with OOPS_VERSION, for example:
+#   curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPS_VERSION=0.2.0 sh
+# Set OOPSY_BIN_DIR to pick a directory.
 set -eu
 
 repo="sohan-bhat/oopsy"
@@ -35,8 +37,10 @@ case "$arch" in
   *) fail "unsupported CPU: $arch" ;;
 esac
 
-version="${OOPSY_VERSION:-}"
-if [ -z "$version" ]; then
+version="${OOPS_VERSION:-${OOPSY_VERSION:-}}"
+if [ -n "$version" ]; then
+  version="v${version#v}"
+else
   version="$(fetch "https://api.github.com/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$version" ] || fail "could not find the latest release"
 fi
@@ -47,7 +51,7 @@ base="https://github.com/$repo/releases/download/$version"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 say "Downloading Oopsy $version for $os/$arch"
-fetch_to "$base/$archive" "$tmp/$archive" || fail "download failed: $base/$archive"
+fetch_to "$base/$archive" "$tmp/$archive" || fail "could not download $version for $os/$arch. Check that the version exists at https://github.com/$repo/releases"
 fetch_to "$base/checksums.txt" "$tmp/checksums.txt" || fail "could not download checksums"
 
 want="$(grep " $archive\$" "$tmp/checksums.txt" | cut -d' ' -f1)"
