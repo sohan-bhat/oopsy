@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sohan-bhat/oopsy/internal/classify"
+	"github.com/sohan-bhat/oopsy/internal/remote"
 	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
 )
@@ -93,10 +94,11 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	trace("classify")
 	actions := append(res.Actions, lazyActions(cmd, cwd)...)
 	trace("rebuildable folders")
+	caps := remote.Plan(cmd, cwd, os.Environ())
 	var s *snap.Snapshot
-	if len(actions) > 0 {
+	if len(actions) > 0 || len(caps) > 0 {
 		var err error
-		s, err = snap.Create(cmd, cwd, base, actions)
+		s, err = snap.Create(cmd, cwd, base, actions, caps...)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s could not save a snapshot: %s\n", ui.ErrWarn("oops:"), ui.Explain(err))
 		}
@@ -176,6 +178,9 @@ func Summary(s *snap.Snapshot) string {
 	}
 	if n := len(s.Git); n > 0 {
 		parts = append(parts, ui.Plural(n, "git ref"))
+	}
+	for _, r := range s.Records {
+		parts = append(parts, r.Label)
 	}
 	what := strings.Join(parts, " and ")
 	if what == "" {
