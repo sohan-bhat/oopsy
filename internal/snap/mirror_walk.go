@@ -87,7 +87,13 @@ func (e errTooBig) Error() string { return "too many files" }
 // ignored folders become a single 'r' node, the store itself is skipped.
 func walkProject(root string, limit int) (walkResult, error) {
 	ign := loadIgnore(root)
-	store := Dir()
+	// Oopsy's own stores are skipped wherever they are inside the project.
+	skip := map[string]bool{pathKey(filepath.Clean(Dir())): true}
+	if vr := volumeRoot(root); vr != "" {
+		if top := volumeTop(vr); top != "" {
+			skip[pathKey(filepath.Clean(top))] = true
+		}
+	}
 	var (
 		mu    sync.Mutex
 		out   []node
@@ -95,32 +101,28 @@ func walkProject(root string, limit int) (walkResult, error) {
 		count int
 		over  bool
 	)
-	sem := make(chan struct{}, 16)
+	sem := make(chan struct{}, 64)
 	var walk func(dir, rel string)
 	walk = func(dir, rel string) {
 		defer wg.Done()
 		sem <- struct{}{}
-		ents, err := os.ReadDir(dir)
+		ents, err := listDir(dir)
 		if err != nil {
 			<-sem
 			return
 		}
 		local := make([]node, 0, len(ents))
 		for _, e := range ents {
-			name := e.Name()
+			name := e.name
 			r := name
 			if rel != "" {
 				r = rel + "/" + name
 			}
-			full := filepath.Join(dir, name)
-			fi, err := entryInfo(full, e)
-			if err != nil {
-				continue
-			}
-			n := node{rel: r, mtime: fi.ModTime().UnixNano(), mode: nodeMode(fi)}
-			switch kindOf(fi) {
-			case kindDir:
-				if within(full, store) || inVolumeStore(full) {
+			n := node{rel: r, mtime: e.mtime, mode: e.mode}
+			switch e.kind {
+			case 'd':
+				full := filepath.Join(dir, name)
+				if skip[pathKey(full)] {
 					continue
 				}
 				if rebuildableNames[name] || ign.match(r, name) {
@@ -132,13 +134,13 @@ func walkProject(root string, limit int) (walkResult, error) {
 				local = append(local, n)
 				wg.Add(1)
 				go walk(full, r)
-			case kindFile:
+			case 'f':
 				if ign.match(r, name) {
 					continue
 				}
-				n.kind, n.size = 'f', fi.Size()
+				n.kind, n.size = 'f', e.size
 				local = append(local, n)
-			case kindSymlink, kindJunction:
+			case 'l':
 				n.kind = 'l'
 				local = append(local, n)
 			}
@@ -166,6 +168,15 @@ func walkProject(root string, limit int) (walkResult, error) {
 		}
 	}
 	return walkResult{nodes: out, files: files}, nil
+}
+
+// dirEntry is what a walk needs to know about one entry.
+type dirEntry struct {
+	name  string
+	kind  byte // 'f', 'd', 'l', or 0 for anything else
+	size  int64
+	mtime int64
+	mode  uint32
 }
 
 // relParent returns the parent of a slash separated relative path, "" for
