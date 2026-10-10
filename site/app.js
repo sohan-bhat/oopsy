@@ -45,7 +45,14 @@
       if (i) installText.appendChild(document.createTextNode(" "));
       const span = document.createElement("span");
       span.className = word.includes("://") ? "w w--url" : "w";
-      span.textContent = word;
+      // URLs may only break right after a slash, never inside a word
+      word.split(/(?<=[^/]\/)(?=[^/])/).forEach((part, j) => {
+        if (j) span.appendChild(document.createElement("wbr"));
+        const piece = document.createElement("span");
+        piece.className = "w";
+        piece.textContent = part;
+        span.appendChild(piece);
+      });
       installText.appendChild(span);
     });
   }
