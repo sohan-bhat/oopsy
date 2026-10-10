@@ -33,6 +33,8 @@ func currentUser() string {
 	return "$USER"
 }
 
-func diskFull(err error) bool { return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) }
+func diskFull(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
+}
 
 func readOnly(err error) bool { return errors.Is(err, syscall.EROFS) }
