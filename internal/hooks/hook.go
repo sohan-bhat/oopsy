@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/sohan-bhat/oopsy/internal/classify"
@@ -32,11 +33,19 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		}
 		agentReply(source, "", stdout)
 	}()
-	var cmd, cwd string
+	var cmd, cwd, tool string
 	switch source {
-	case "zsh", "bash", "fish", "shell":
+	case "zsh", "bash", "fish", "shell", "powershell", "cmd":
 		cmd = strings.Join(args, " ")
-		cwd, _ = os.Getwd()
+		if cmd == "" {
+			// The PowerShell hook passes the line in the environment, since
+			// Windows PowerShell mangles quotes in native arguments.
+			cmd = os.Getenv("OOPSY_LINE")
+		}
+		cwd = os.Getenv("OOPSY_CWD")
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
 	default:
 		b, err := io.ReadAll(io.LimitReader(stdin, 4<<20))
 		if err != nil {
@@ -50,6 +59,7 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if cmd == "" {
 			cmd = in.Command
 		}
+		tool = in.ToolName
 		cwd = in.Cwd
 		if cwd == "" && len(in.WorkspaceRoots) > 0 {
 			cwd = in.WorkspaceRoots[0]
@@ -61,10 +71,10 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			cwd, _ = os.Getwd()
 		}
 	}
-	if cmd == "" || !classify.MaybeDestructive(cmd) {
+	if cmd == "" {
 		return 0
 	}
-	res := classify.Classify(cmd, cwd, os.Environ())
+	res := classifyFor(source, tool, cmd, cwd)
 	if !res.Destructive() {
 		return 0
 	}
@@ -79,7 +89,7 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	msg := Summary(s)
 	cfg := snap.LoadConfig()
 	switch source {
-	case "zsh", "bash", "fish", "shell":
+	case "zsh", "bash", "fish", "shell", "powershell", "cmd":
 		if !cfg.Quiet || len(s.Skipped) > 0 {
 			fmt.Fprintln(stderr, ui.ErrDim(msg))
 		}
@@ -97,6 +107,29 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 }
 
 var replied bool
+
+// classifyFor picks the parser for where the command came from. Agents on
+// Windows may run commands through Git Bash, PowerShell or cmd.exe, and the
+// payload does not always say which, so all three are tried and merged:
+// an extra snapshot is cheap, a missed one is not.
+func classifyFor(source, tool, cmd, cwd string) classify.Result {
+	env := os.Environ()
+	switch source {
+	case "zsh", "bash", "fish", "shell":
+		return classify.Classify(cmd, cwd, env)
+	case "powershell":
+		return classify.ClassifyPowerShell(cmd, cwd, env)
+	case "cmd":
+		return classify.ClassifyCmd(cmd, cwd, env)
+	}
+	if strings.EqualFold(tool, "PowerShell") {
+		return classify.ClassifyPowerShell(cmd, cwd, env)
+	}
+	if runtime.GOOS != "windows" {
+		return classify.Classify(cmd, cwd, env)
+	}
+	return classify.Merge(classify.Classify(cmd, cwd, env), classify.ClassifyPowerShell(cmd, cwd, env), classify.ClassifyCmd(cmd, cwd, env))
+}
 
 // agentReply prints the JSON some agents require on stdout.
 func agentReply(source, _ string, stdout io.Writer) {
