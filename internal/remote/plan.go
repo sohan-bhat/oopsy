@@ -70,6 +70,8 @@ func Targets(cmd, cwd string, env []string) []Target {
 			ts = tfTargets(c)
 		case "docker", "podman":
 			ts = dockerTargets(c)
+		case "helm":
+			ts = helmTargets(c)
 		default:
 			continue
 		}
