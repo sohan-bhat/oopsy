@@ -51,7 +51,9 @@ func LoadConfig() Config {
 	cfg := DefaultConfig
 	b, err := os.ReadFile(ConfigPath())
 	if err == nil {
-		_ = json.Unmarshal(b, &cfg)
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			cfg = DefaultConfig
+		}
 	}
 	if cfg.KeepDays <= 0 {
 		cfg.KeepDays = DefaultConfig.KeepDays
@@ -63,6 +65,23 @@ func LoadConfig() Config {
 		cfg.CopyCapBytes = DefaultConfig.CopyCapBytes
 	}
 	return cfg
+}
+
+// ConfigProblem explains a settings file Oopsy cannot read, or returns ""
+// when it is fine or missing. Oopsy then runs with the defaults.
+func ConfigProblem() string {
+	b, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		return fmt.Sprintf("%s could not be read (%v), so Oopsy is using its default settings", ConfigPath(), err)
+	}
+	var cfg Config
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		return fmt.Sprintf("%s is not valid JSON (%v), so Oopsy is using its default settings. Fix it, or delete it and set things again with oops config", ConfigPath(), err)
+	}
+	return ""
 }
 
 // SaveConfig writes settings.

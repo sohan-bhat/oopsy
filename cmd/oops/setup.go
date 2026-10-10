@@ -71,7 +71,7 @@ are set up unless you pass --all or --only. Every file is backed up to
 			for _, t := range targets {
 				bk, err := hooks.Install(t, bin)
 				if err != nil {
-					fmt.Printf("  %s %-12s %v\n", ui.Bad("failed"), t.Label, err)
+					fmt.Printf("  %s %-12s %s\n", ui.Bad("failed"), t.Label, ui.Explain(err))
 					continue
 				}
 				detail := ui.HomeRel(t.Path)
@@ -129,7 +129,7 @@ func uninstallCmd() *cobra.Command {
 				}
 				bk, err := hooks.Uninstall(t)
 				if err != nil {
-					fmt.Printf("  %s %-12s %v\n", ui.Bad("failed"), t.Label, err)
+					fmt.Printf("  %s %-12s %s\n", ui.Bad("failed"), t.Label, ui.Explain(err))
 					continue
 				}
 				removed++
@@ -300,8 +300,11 @@ func doctorCmd() *cobra.Command {
 			} else if anyHook {
 				warnf("this shell", "hook not loaded in this terminal; open a new one")
 			}
+			if p := snap.ConfigProblem(); p != "" {
+				bad("settings", p)
+			}
 			if err := os.MkdirAll(snap.Dir(), 0o700); err != nil {
-				bad("storage", err.Error())
+				bad("storage", ui.Explain(err))
 			} else {
 				ok("storage", ui.HomeRel(snap.Dir()))
 			}
