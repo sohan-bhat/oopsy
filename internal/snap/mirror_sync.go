@@ -17,6 +17,14 @@ const DefaultMirrorMaxFiles = 50000
 // The caller holds the mirror lock.
 func (m *Mirror) sync(attr *Pending, limit int) (*SyncResult, error) {
 	start := time.Now()
+	usn, haveUSN := m.usnStart()
+	if haveUSN && m.Exists() && m.usnClean() {
+		// The change journal says nothing in the project changed.
+		m.usnAdvance(usn)
+		Trace("change journal: nothing changed")
+		mm, _ := m.meta()
+		return &SyncResult{Files: mm.Files, Millis: float64(time.Since(start).Microseconds()) / 1000}, nil
+	}
 	old, _ := readIndex(m.indexPath())
 	Trace("read index")
 	w, err := walkProject(m.Root, limit)
@@ -94,6 +102,9 @@ func (m *Mirror) sync(attr *Pending, limit int) (*SyncResult, error) {
 	_ = m.saveMeta(mm)
 	for k := range oldStamps {
 		delete(oldStamps, k)
+	}
+	if haveUSN {
+		m.usnSave(usn)
 	}
 	res.Snapshot = snap
 	res.Millis = float64(time.Since(start).Microseconds()) / 1000
