@@ -83,7 +83,7 @@ DROP SCHEMA, TRUNCATE, DELETE, UPDATE or ALTER TABLE ... DROP COLUMN runs, it
 copies exactly the affected data into an "oops" schema inside the same
 transaction. oops db undo puts it back.`,
 	}
-	c.AddCommand(dbProxyCmd(), dbWrapCmd(), dbListCmd(), dbUndoCmd(), dbPruneCmd())
+	c.AddCommand(dbProxyCmd(), dbWrapCmd(), dbListCmd(), dbUndoCmd(), dbPruneCmd(), dbProtectCmd(), dbUnprotectCmd())
 	return c
 }
 
@@ -276,7 +276,7 @@ func kindLabel(k string) string {
 		"delete": "DELETE", "update": "UPDATE", "update_full": "UPDATE", "truncate": "TRUNCATE",
 		"drop_table": "DROP TABLE", "drop_schema": "DROP SCHEMA", "drop_column": "DROP COLUMN",
 		"drop_view": "DROP VIEW", "drop_matview": "DROP MAT VIEW", "drop_function": "DROP FUNCTION",
-		"upsert": "UPSERT",
+		"upsert": "UPSERT", "audit_delete": "DELETE", "audit_update": "UPDATE",
 	}[k]
 }
 
@@ -310,6 +310,7 @@ func dbListCmd() *cobra.Command {
 				warnf("could not reach the database, showing dumps only: %v", err)
 			} else {
 				defer conn.Close(ctx)
+				pgproxy.PruneAudit(ctx, conn)
 				list, err := pgproxy.ListChanges(ctx, conn, n)
 				if err != nil {
 					return err
@@ -329,7 +330,7 @@ func dbListCmd() *cobra.Command {
 				rows = rows[:n]
 			}
 			if len(rows) == 0 {
-				fmt.Println("No database snapshots yet. Run your app or agent through oops db proxy or oops db wrap.")
+				fmt.Println("No database snapshots yet. Run your app or agent through oops db proxy or oops db wrap, or turn on oops db protect.")
 				return nil
 			}
 			fmt.Printf("%s  %s  %s  %s  %s\n", ui.Dim(pad("ID", 5)), ui.Dim(pad("WHEN", 11)), ui.Dim(pad("KIND", 13)), ui.Dim(pad("ROWS", 8)), ui.Dim("TARGET"))
@@ -434,6 +435,7 @@ func dbUndoCmd() *cobra.Command {
 			}
 			ctx := context.Background()
 			defer conn.Close(ctx)
+			pgproxy.PruneAudit(ctx, conn)
 			ch, err := pgproxy.FindChange(ctx, conn, id)
 			if err != nil {
 				return err
@@ -477,6 +479,71 @@ func dbUndoCmd() *cobra.Command {
 	return c
 }
 
+func dbProtectCmd() *cobra.Command {
+	var u string
+	c := &cobra.Command{
+		Use:   "protect",
+		Short: "Add triggers so changes made without the proxy can be undone too",
+		Long: `oops db protect installs triggers in the database itself, for changes that do
+not go through the proxy: a psql session, a migration tool, a cron job.
+
+Before DELETE, UPDATE and TRUNCATE on any table (and tables created later),
+the old rows are kept in the oops schema. Before DROP TABLE, DROP VIEW, DROP
+MATERIALIZED VIEW, DROP FUNCTION, DROP PROCEDURE and DROP SCHEMA, the data or
+definition is saved. Each transaction becomes one entry in oops db list, and
+oops db undo reverses it. Saved changes are kept for 7 days.
+
+It needs a superuser connection, adds some write overhead, and does not cover
+INSERT, COPY or DROP DATABASE. oops db unprotect removes the triggers again.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			url, err := resolveURL(u)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			n, err := pgproxy.Protect(ctx, url)
+			if err != nil {
+				return err
+			}
+			rememberUpstream(url)
+			fmt.Printf("%s Protected %s. Tables created later will be protected too.\n", ui.Good("Done."), ui.Plural(n, "table"))
+			fmt.Println(ui.Dim("Changes made without the proxy now show up in oops db list. Turn it off with oops db unprotect."))
+			return nil
+		},
+	}
+	c.Flags().StringVar(&u, "url", "", "database URL (defaults to the last proxied upstream)")
+	return c
+}
+
+func dbUnprotectCmd() *cobra.Command {
+	var u string
+	c := &cobra.Command{
+		Use:   "unprotect",
+		Short: "Remove the triggers oops db protect added",
+		Long: `oops db unprotect removes the triggers, event triggers and functions that
+oops db protect added. Changes saved so far stay in the oops schema and can
+still be undone until oops db prune drops them.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			url, err := resolveURL(u)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := pgproxy.Unprotect(ctx, url); err != nil {
+				return err
+			}
+			fmt.Println(ui.Good("Done.") + " The protect triggers are gone. Changes saved so far can still be undone.")
+			return nil
+		},
+	}
+	c.Flags().StringVar(&u, "url", "", "database URL (defaults to the last proxied upstream)")
+	return c
+}
+
 func dbPruneCmd() *cobra.Command {
 	var u string
 	var days int
@@ -498,6 +565,7 @@ func dbPruneCmd() *cobra.Command {
 				return err
 			}
 			defer conn.Close(context.Background())
+			pgproxy.PruneAudit(context.Background(), conn)
 			n, err := pgproxy.Prune(context.Background(), conn, age, true)
 			if err != nil {
 				return err

@@ -102,7 +102,8 @@ func ListChanges(ctx context.Context, conn *pgx.Conn, limit int) ([]Change, erro
 		       coalesce(snap,''), coalesce(key_cols, '{}'), coalesce(col_def,''), coalesce(ddl,''), coalesce(ddl_post,'{}'),
 		       meta, coalesce(row_count,0), coalesce(statement,''), restored_at
 		  FROM oops.journal
-		 WHERE grp IN (SELECT grp FROM oops.journal GROUP BY grp ORDER BY min(id) DESC LIMIT $1)
+		 WHERE NOT (meta ? 'pending')
+		   AND grp IN (SELECT grp FROM oops.journal WHERE NOT (meta ? 'pending') GROUP BY grp ORDER BY min(id) DESC LIMIT $1)
 		 ORDER BY id`, limit)
 	if err != nil {
 		return nil, err
@@ -172,9 +173,9 @@ func Describe(c Change) []string {
 	var out []string
 	for _, e := range c.Entries {
 		switch e.Kind {
-		case "delete", "truncate":
+		case "delete", "truncate", "audit_delete":
 			out = append(out, fmt.Sprintf("put back %d rows into %s.%s", e.Rows, e.Schema, e.Table))
-		case "update":
+		case "update", "audit_update":
 			out = append(out, fmt.Sprintf("restore the old values of %d rows in %s.%s", e.Rows, e.Schema, e.Table))
 		case "upsert":
 			fresh, _ := e.Meta["fresh"].(float64)
@@ -220,6 +221,10 @@ func Undo(ctx context.Context, conn *pgx.Conn, c Change) (*Result, error) {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+	// The protect triggers must not save the undo itself.
+	if _, err := tx.Exec(ctx, "SET LOCAL oops.paused = 'on'"); err != nil {
+		return nil, err
+	}
 
 	// Phase 1: schemas and tables, phase 2: data, phase 3: constraints and views.
 	var drops []Entry
@@ -267,10 +272,28 @@ func Undo(ctx context.Context, conn *pgx.Conn, c Change) (*Result, error) {
 
 	// Row level restores, retrying to satisfy foreign keys between tables.
 	var pending []Entry
+	var temps []string
 	for _, e := range c.Entries {
 		switch e.Kind {
 		case "delete", "truncate", "update", "update_full", "upsert":
 			pending = append(pending, e)
+		case "audit_delete", "audit_update":
+			m, err := materialize(ctx, tx, e)
+			if err != nil {
+				return nil, err
+			}
+			temps = append(temps, m.Snap)
+			if s, _ := m.Meta["new_snap"].(string); s != "" {
+				temps = append(temps, s)
+			}
+			pending = append(pending, m)
+		}
+	}
+	if isAuditGroup(c.Group) {
+		// One transaction may change the same row twice; undo the later
+		// change first so the oldest values win.
+		for i, j := 0, len(pending)-1; i < j; i, j = i+1, j-1 {
+			pending[i], pending[j] = pending[j], pending[i]
 		}
 	}
 	for pass := 0; len(pending) > 0 && pass <= len(pending); pass++ {
@@ -334,6 +357,11 @@ func Undo(ctx context.Context, conn *pgx.Conn, c Change) (*Result, error) {
 		defs = retry
 	}
 
+	for _, t := range temps {
+		if _, err := tx.Exec(ctx, "DROP TABLE IF EXISTS oops."+qi(t)); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := tx.Exec(ctx, "UPDATE oops.journal SET restored_at = now() WHERE grp = $1", c.Group); err != nil {
 		return nil, err
 	}
@@ -558,6 +586,8 @@ func restoreRowsInner(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
 			line += fmt.Sprintf(", %d missing rows put back", inserted)
 		}
 		return line, nil
+	case "audit_update_nokey":
+		return restoreByValue(ctx, tx, e)
 	case "upsert":
 		updated, inserted, err := restoreOldValues(ctx, tx, e)
 		if err != nil {
@@ -626,6 +656,76 @@ func restoreOldValues(ctx context.Context, tx pgx.Tx, e Entry) (int64, int64, er
 		return 0, 0, err
 	}
 	return updated, inserted, nil
+}
+
+func isAuditGroup(g string) bool { return strings.HasPrefix(g, "tx") }
+
+// materialize turns rows oops db protect kept into a snapshot table, so the
+// usual restores apply.
+func materialize(ctx context.Context, tx pgx.Tx, e Entry) (Entry, error) {
+	var exists bool
+	if err := tx.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", e.qualified()).Scan(&exists); err != nil {
+		return e, err
+	}
+	if !exists {
+		return e, fmt.Errorf("table %s.%s does not exist any more; undo the change that dropped it first", e.Schema, e.Table)
+	}
+	// The rows were kept in their text form; a table with the columns the
+	// target had at that moment reads them back exactly.
+	fill := func(name, col string) error {
+		if _, err := tx.Exec(ctx, fmt.Sprintf("CREATE TABLE oops.%s (%s)", qi(name), e.ColDef)); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO oops.%s SELECT (a.%s::oops.%s).* FROM oops.audit a WHERE a.jid = %d AND a.%s IS NOT NULL",
+			qi(name), col, qi(name), e.ID, col))
+		return err
+	}
+	m := e
+	m.Meta = map[string]any{}
+	for k, v := range e.Meta {
+		m.Meta[k] = v
+	}
+	m.Snap = fmt.Sprintf("%s_m%d", e.Group, e.ID)
+	if err := fill(m.Snap, "old"); err != nil {
+		return e, fmt.Errorf("reading the saved rows of %s.%s: %w", e.Schema, e.Table, err)
+	}
+	switch {
+	case e.Kind == "audit_delete":
+		m.Kind = "delete"
+	case len(e.KeyCols) > 0:
+		m.Kind = "update"
+	default:
+		m.Kind = "audit_update_nokey"
+		ns := m.Snap + "n"
+		if err := fill(ns, "new"); err != nil {
+			return e, err
+		}
+		m.Meta["new_snap"] = ns
+	}
+	return m, nil
+}
+
+// restoreByValue undoes an UPDATE on a table without a key: it deletes one
+// current row for each row the update wrote, matched on all columns, and
+// inserts the old rows again.
+func restoreByValue(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
+	ns, _ := e.Meta["new_snap"].(string)
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE ctid IN (
+		SELECT a.ctid FROM (SELECT t.ctid, t::text AS r, row_number() OVER (PARTITION BY t::text) AS k FROM %s t) a
+		JOIN (SELECT n::text AS r, count(*) AS c FROM oops.%s n GROUP BY 1) b ON a.r = b.r AND a.k <= b.c)`,
+		e.qualified(), e.qualified(), qi(ns)))
+	if err != nil {
+		return "", fmt.Errorf("finding the updated rows in %s.%s: %w", e.Schema, e.Table, err)
+	}
+	n, err := insertRows(ctx, tx, e, false)
+	if err != nil {
+		return "", err
+	}
+	line := fmt.Sprintf("%d rows in %s.%s set back to their old values (matched on every column, the table has no key)", n, e.Schema, e.Table)
+	if tag.RowsAffected() < e.Rows {
+		line += fmt.Sprintf(", %d of the updated rows had changed again and were left alone", e.Rows-tag.RowsAffected())
+	}
+	return line, nil
 }
 
 // removeFresh deletes the rows an upsert inserted, that is incoming rows
@@ -763,6 +863,9 @@ func Prune(ctx context.Context, conn *pgx.Conn, olderThan time.Duration, restore
 				return 0, err
 			}
 		}
+		if err := deleteAudit(ctx, conn, " WHERE grp = $1", x.grp); err != nil {
+			return 0, err
+		}
 		if _, err := conn.Exec(ctx, "DELETE FROM oops.journal WHERE grp = $1", x.grp); err != nil {
 			return 0, err
 		}
@@ -775,4 +878,75 @@ type NotFoundError struct{ ID int64 }
 
 func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("there is no database change %d. oops db list shows the ones you have (they are kept 7 days)", e.ID)
+}
+
+// deleteAudit deletes the rows protect kept for the journal entries that
+// match where. It does nothing when protect was never installed.
+func deleteAudit(ctx context.Context, q execer, where string, args ...any) error {
+	var ok bool
+	if err := q.QueryRow(ctx, "SELECT to_regclass('oops.audit') IS NOT NULL").Scan(&ok); err != nil || !ok {
+		return err
+	}
+	_, err := q.Exec(ctx, "DELETE FROM oops.audit WHERE jid IN (SELECT id FROM oops.journal"+where+")", args...)
+	return err
+}
+
+// AuditRetention is how long changes saved by oops db protect are kept.
+const AuditRetention = 7 * 24 * time.Hour
+
+// PruneAudit drops what oops db protect saved more than AuditRetention ago,
+// and saves that turned out not to be needed. It runs on list, undo and
+// prune, and errors are ignored: pruning is opportunistic.
+func PruneAudit(ctx context.Context, conn *pgx.Conn) {
+	ok, err := hasJournal(ctx, conn)
+	if err != nil || !ok {
+		return
+	}
+	rows, err := conn.Query(ctx, `SELECT grp, coalesce(array_agg(snap) FILTER (WHERE snap IS NOT NULL), '{}') FROM oops.journal
+		WHERE grp LIKE 'tx%' GROUP BY grp HAVING min(created_at) < now() - $1::interval OR bool_or(meta ? 'pending')`,
+		fmt.Sprintf("%d seconds", int(AuditRetention.Seconds())))
+	if err != nil {
+		return
+	}
+	type g struct {
+		grp   string
+		snaps []string
+	}
+	var groups []g
+	for rows.Next() {
+		var x g
+		if rows.Scan(&x.grp, &x.snaps) == nil {
+			groups = append(groups, x)
+		}
+	}
+	rows.Close()
+	for _, x := range groups {
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return
+		}
+		_, _ = tx.Exec(ctx, "SET LOCAL oops.paused = 'on'")
+		// Saves for objects that were not dropped after all go; the rest of
+		// the group only goes once it is old.
+		var gone []string
+		r, err := tx.Query(ctx, `SELECT snap FROM oops.journal WHERE grp = $1 AND snap IS NOT NULL
+			AND (meta ? 'pending' OR created_at < now() - $2::interval)`, x.grp, fmt.Sprintf("%d seconds", int(AuditRetention.Seconds())))
+		if err == nil {
+			for r.Next() {
+				var s string
+				if r.Scan(&s) == nil {
+					gone = append(gone, s)
+				}
+			}
+			r.Close()
+		}
+		for _, s := range gone {
+			_, _ = tx.Exec(ctx, "DROP TABLE IF EXISTS oops."+qi(s))
+		}
+		where := ` WHERE grp = $1 AND (meta ? 'pending' OR created_at < now() - $2::interval)`
+		age := fmt.Sprintf("%d seconds", int(AuditRetention.Seconds()))
+		_ = deleteAudit(ctx, tx, where, x.grp, age)
+		_, _ = tx.Exec(ctx, "DELETE FROM oops.journal"+where, x.grp, age)
+		_ = tx.Commit(ctx)
+	}
 }
