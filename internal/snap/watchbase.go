@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -142,8 +143,8 @@ func UpdateWatchBase(root string, maxFile int64, verify bool) (BaseResult, error
 	recs := make(map[string]baseRec, len(idx))
 	changed := len(old) == 0
 	for _, n := range idx {
-		if n.kind != 'f' || n.size > maxFile {
-			continue
+		if n.kind != 'f' || n.size > maxFile || n.rel == ".git" || strings.HasPrefix(n.rel, ".git/") {
+			continue // git writes new files, never in place, and watch skips its folder
 		}
 		if b, ok := old[n.rel]; ok && b.stamp() == n.stamp() {
 			if !verify || exists(ObjectPath(b.hex())) {
