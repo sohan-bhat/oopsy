@@ -201,7 +201,7 @@
         <li>File edits made in an editor, or by an agent's own edit tool instead of the shell.</li>
         <li>Anything remote, like <code>ssh</code>, <code>kubectl delete</code> or <code>terraform destroy</code>.</li>
         <li>Database changes that skip the proxy, plus <code>DROP DATABASE</code>, <code>DROP VIEW</code> and upserts.</li>
-        <li>Overwrites of huge files on disks without copy on write, like NTFS and ext4. Copies stop at 1 GB, and Oopsy tells you what it skipped.</li>
+        <li>An overwrite on a disk without copy on write, like NTFS and ext4, when the copy would leave less than the free space floor. Oopsy skips it and tells you right then.</li>
         <li>Commands typed straight into cmd.exe, which has no hook. PowerShell, Git Bash and agent commands are covered.</li>
         <li>A dead disk. Snapshots live next to your files, so keep a real backup too.</li>
       </ul>
@@ -227,7 +227,7 @@
       </details>
       <details class="qa">
         <summary>How much disk does it use?</summary>
-        <p>On APFS, Btrfs, XFS, ReFS and Windows Dev Drives, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On NTFS and ext4, a command that only deletes is saved with hard links, which cost nothing either. Overwrites there get a regular copy, compressed on NTFS, up to 1 GB per command. Snapshots are kept for 7 days and capped at 5 GB in total, and you can change both in <code>~/.oops/config.json</code>.</p>
+        <p>On APFS, Btrfs, XFS, ReFS and Windows Dev Drives, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On NTFS and ext4, a command that only deletes is saved with hard links, which cost nothing either. Overwrites there get a real copy, compressed with NTFS compression on Windows and zstd elsewhere, of any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, between 2 and 20 GB. Snapshots are kept for 7 days and capped at 5 GB in total, and you can change both in <code>~/.oops/config.json</code>.</p>
       </details>
       <details class="qa">
         <summary>Does it work on Windows?</summary>
