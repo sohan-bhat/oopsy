@@ -74,8 +74,10 @@ if not set -q __OOPSY_LOADED
     set -gx OOPSY_SHELL_HOOK fish
 end
 `, shQuote(re), q), nil
+	case "powershell", "pwsh":
+		return powerShellInit(bin), nil
 	}
-	return "", fmt.Errorf("unknown shell %q (use zsh, bash or fish)", shell)
+	return "", fmt.Errorf("unknown shell %q (use zsh, bash, fish or powershell)", shell)
 }
 
 func shQuote(s string) string {
