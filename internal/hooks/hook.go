@@ -100,6 +100,9 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 		if err != nil {
 			fmt.Fprintf(stderr, "%s could not save a snapshot: %s\n", ui.ErrWarn("oops:"), ui.Explain(err))
 		}
+		if s != nil {
+			snap.AwaitAfter(session, s.ID)
+		}
 	}
 	beforeCommand(base, cmd, cwd, session, s, stderr)
 	trace("mirror sync")
