@@ -163,6 +163,12 @@ func makeTree(t *testing.T, root string) {
 	os.Symlink("src", filepath.Join(root, "link-to-dir"))
 	os.Symlink("does/not/exist", filepath.Join(root, "dangling"))
 	os.MkdirAll(filepath.Join(root, "emptydir"), 0o750)
+	if onWindows {
+		os.WriteFile(filepath.Join(root, "hidden.txt"), []byte("hidden\n"), 0o644)
+		os.WriteFile(filepath.Join(root, "src", "desktop.ini"), []byte("[.ShellClassInfo]\n"), 0o644)
+		setWinAttrs(filepath.Join(root, "hidden.txt"), 0x2)             // hidden
+		setWinAttrs(filepath.Join(root, "src", "desktop.ini"), 0x2|0x4) // hidden and system
+	}
 	// Old, distinct timestamps everywhere, deepest first so parents stick.
 	var paths []string
 	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -181,6 +187,8 @@ type node struct {
 	link  string
 	data  []byte
 	mtime int64
+	attrs uint32 // Windows attributes (read only, hidden, system, archive)
+	ctime int64  // Windows creation time
 }
 
 func snapshotTree(t *testing.T, root string, withRootMtime bool) map[string]node {
@@ -205,6 +213,9 @@ func snapshotTree(t *testing.T, root string, withRootMtime bool) map[string]node
 			n.mtime = 0 // symlink times are not portable to compare
 		case fi.Mode().IsRegular():
 			n.data, _ = os.ReadFile(p)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 && (rel != "." || withRootMtime) {
+			n.attrs, n.ctime = winMeta(p)
 		}
 		out[rel] = n
 		return nil
@@ -234,6 +245,12 @@ func compareTrees(t *testing.T, want, got map[string]node) {
 		}
 		if w.mtime != g.mtime {
 			t.Errorf("%s: mtime %v, want %v", k, time.UnixMicro(g.mtime), time.UnixMicro(w.mtime))
+		}
+		if w.attrs != g.attrs {
+			t.Errorf("%s: attributes %#x, want %#x", k, g.attrs, w.attrs)
+		}
+		if w.ctime != g.ctime {
+			t.Errorf("%s: creation time %v, want %v", k, time.Unix(0, g.ctime), time.Unix(0, w.ctime))
 		}
 	}
 	for k := range got {
