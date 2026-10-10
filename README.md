@@ -112,6 +112,13 @@ When the folder is on another drive than your home, hard links and clones go to 
 
 PowerShell has no preexec hook, so Oopsy wraps the function PSReadLine uses to read each line and checks it after you press Enter, before it runs, and runs the after step from the prompt function. The PowerShell parser knows `Remove-Item` and its aliases, `Move-Item`, `Copy-Item`, `Set-Content`, `Out-File`, redirects and pipelines like `Get-ChildItem *.log | Remove-Item`. Agent commands on Windows are read as bash, PowerShell and cmd.exe at once.
 
+Infrastructure commands get their state saved first, by the tool itself, with a timeout so they are never held up:
+
+* `kubectl delete`, `apply` and `replace` (and `oc`): the exact targets are saved as JSON with `kubectl get`, pinned to the current context. Undo recreates deleted objects through the API and puts changed ones back; objects an apply created are listed with the command to delete them, never deleted for you. `kubectl delete namespace` also saves the common objects inside it. Data inside volumes is not saved, so a recreated volume claim comes back empty, and undo says so.
+* `terraform` and `tofu` `destroy`, `apply` and `state rm` or `mv`: the state is saved with `state pull` and pushed back with a newer serial, never with `-force`. Only the state comes back: resources that were destroyed must be recreated with `terraform apply`, and data inside them (database rows, bucket objects, disks) was not saved.
+* `docker volume rm` and `prune` (and `podman`): the volume's files are saved as a zstd compressed tar under the free space floor, and undo recreates the volume with its driver, options and labels.
+* `helm uninstall`: the release's records and live resources are saved, and undo brings the release back into `helm list` at the same revision. Resources made by chart hooks are not saved.
+
 Restores never overwrite newer work: if something exists at the path again, both copies are kept.
 
 The Postgres proxy speaks the wire protocol and parses every statement. Before a `DELETE`, `UPDATE`, `TRUNCATE`, `DROP TABLE`, `DROP SCHEMA` or `ALTER TABLE ... DROP COLUMN` it copies exactly the affected rows, tables or column into an `oops` schema inside the same transaction, so a rollback discards the snapshot too.
@@ -121,7 +128,8 @@ The Postgres proxy speaks the wire protocol and parses every statement. Before a
 * A program that writes into a file in place on NTFS, or a statically linked program doing so on ext4. The mirror there uses hard links, which share the file, so Oopsy notices the change but cannot keep the old version, and says so.
 * A rebuildable folder like `node_modules` deleted by a program that does not name it anywhere Oopsy can read. Rebuild it.
 * Commands run right in your home folder or a system folder, and projects over 50,000 files: only what the command line names is saved there.
-* Anything remote: `ssh`, `rsync` to another host, cloud resources, `kubectl delete`, `docker volume rm`, `terraform destroy`.
+* Other machines: commands run over `ssh` or `rsync` to another host change another computer, so undo there needs Oopsy installed there too.
+* Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, objects or disks inside cloud resources.
 * File edits made by an editor or by an agent's own edit tool rather than the shell.
 * Database changes that do not go through the proxy, plus `DROP DATABASE`, `DROP INDEX`, `DROP VIEW`, deletes inside functions or triggers, and upserts. Grants and row level security policies are not restored. An `UPDATE` on a table without a primary key is undone by restoring the whole table.
 * Overwrites on a disk without copy on write (NTFS, ext4) when the copy would leave less than the free space floor: Oopsy skips that copy and tells you.
