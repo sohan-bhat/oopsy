@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/spf13/cobra"
 
+	"github.com/sohan-bhat/oopsy/internal/cli"
 	"github.com/sohan-bhat/oopsy/internal/pgproxy"
 	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
@@ -35,9 +36,15 @@ func main() {
 	root.SetVersionTemplate("oops-db {{.Version}}\n")
 	root.SilenceUsage = true
 	root.SilenceErrors = true
+	cli.FriendlyArgs(root)
+	root.SetFlagErrorFunc(cli.FlagError)
 	if err := root.Execute(); err != nil {
-		ui.Errorf("%v", err)
-		os.Exit(1)
+		ui.Errorf("%s", ui.Explain(err))
+		var nf *pgproxy.NotFoundError
+		if errors.As(err, &nf) {
+			os.Exit(cli.ExitNotFound)
+		}
+		os.Exit(cli.ExitCode(err))
 	}
 }
 
@@ -120,7 +127,7 @@ func resolveURL(flag string) (string, error) {
 	if v := os.Getenv("DATABASE_URL"); v != "" {
 		return v, nil
 	}
-	return "", errors.New("no database given; pass --url postgres://... or set OOPS_DATABASE_URL")
+	return "", cli.UsageErr("Oopsy does not know which database to use. Pass --url postgres://user:pass@host:5432/db, or set OOPS_DATABASE_URL")
 }
 
 func redact(u string) string {
@@ -138,7 +145,7 @@ func startProxy(upstream, listen string, logger *log.Logger) (*pgproxy.Proxy, er
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := pgproxy.Setup(ctx, upstream); err != nil {
-		return nil, fmt.Errorf("could not prepare the database: %w", err)
+		return nil, fmt.Errorf("could not prepare the database: %w", dbError(err, upstream))
 	}
 	p, err := pgproxy.New(upstream, logger)
 	if err != nil {
@@ -271,7 +278,8 @@ func connect(urlFlag string) (*pgx.Conn, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return pgx.Connect(ctx, u)
+	conn, err := pgx.Connect(ctx, u)
+	return conn, dbError(err, u)
 }
 
 func kindLabel(k string) string {
@@ -413,7 +421,7 @@ func dbUndoCmd() *cobra.Command {
 				}
 				v, err := strconv.ParseInt(arg, 10, 64)
 				if err != nil {
-					return fmt.Errorf("%q is not an id (see oops db list)", args[0])
+					return cli.UsageErr("%q is not a change id. oops db list shows them; then run for example: oops db undo 42", args[0])
 				}
 				id = v
 			}

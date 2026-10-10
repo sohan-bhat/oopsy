@@ -161,7 +161,7 @@ func FindChange(ctx context.Context, conn *pgx.Conn, id int64) (*Change, error) 
 	if id == 0 {
 		return nil, nil
 	}
-	return nil, fmt.Errorf("no database change %d (see oops db list)", id)
+	return nil, &NotFoundError{ID: id}
 }
 
 func qi(s string) string { return quoteIdent(s) }
@@ -942,4 +942,11 @@ func PruneAudit(ctx context.Context, conn *pgx.Conn) {
 		_, _ = tx.Exec(ctx, "DELETE FROM oops.journal"+where, x.grp, age)
 		_ = tx.Commit(ctx)
 	}
+}
+
+// NotFoundError is a change id that is not in the journal.
+type NotFoundError struct{ ID int64 }
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("there is no database change %d. oops db list shows the ones you have (they are kept 7 days)", e.ID)
 }

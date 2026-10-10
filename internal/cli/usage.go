@@ -81,7 +81,14 @@ func FriendlyArgs(c *cobra.Command) {
 	}
 	orig := c.Args
 	if orig == nil {
-		return
+		if !c.HasSubCommands() {
+			return
+		}
+		// A group like oops db: unknown words get a suggestion too.
+		orig = cobra.NoArgs
+		if c.Run == nil && c.RunE == nil {
+			c.RunE = func(cmd *cobra.Command, args []string) error { return cmd.Help() }
+		}
 	}
 	c.Args = func(cmd *cobra.Command, args []string) error {
 		err := orig(cmd, args)
@@ -92,8 +99,19 @@ func FriendlyArgs(c *cobra.Command) {
 	}
 }
 
-func argsError(cmd *cobra.Command, args []string) error {
+// displayPath is how a person types cmd. The oops-db binary's root is
+// named "oops db", since it runs as oops db.
+func displayPath(cmd *cobra.Command) string {
 	path := cmd.CommandPath()
+	root := cmd.Root()
+	if use := strings.Fields(root.Use); len(use) > 1 && !strings.HasPrefix(use[1], "[") && !strings.HasPrefix(use[1], "<") {
+		path = strings.Join(use[:2], " ") + strings.TrimPrefix(path, root.Name())
+	}
+	return path
+}
+
+func argsError(cmd *cobra.Command, args []string) error {
+	path := displayPath(cmd)
 	if !cmd.HasParent() || (cmd.HasSubCommands() && len(args) > 0) {
 		// An unknown word after oops (or oops db, oops watch).
 		word := args[0]
@@ -134,19 +152,19 @@ func FlagError(c *cobra.Command, err error) error {
 		}
 	}
 	if name != "" {
-		out := fmt.Sprintf("%s does not have a %s option.", c.CommandPath(), name)
+		out := fmt.Sprintf("%s does not have a %s option.", displayPath(c), name)
 		if s := closestFlag(c, strings.TrimLeft(name, "-")); s != "" {
 			out += fmt.Sprintf(" Did you mean %s?", s)
 		}
-		return UsageErr("%s Run %s --help to see its options.", out, c.CommandPath())
+		return UsageErr("%s Run %s --help to see its options.", out, displayPath(c))
 	}
 	if strings.Contains(msg, "flag needs an argument") {
-		return UsageErr("%s: %s. Run %s --help for an example.", c.CommandPath(), strings.ReplaceAll(msg, "flag needs an argument", "this option needs a value"), c.CommandPath())
+		return UsageErr("%s: %s. Run %s --help for an example.", displayPath(c), strings.ReplaceAll(msg, "flag needs an argument", "this option needs a value"), displayPath(c))
 	}
 	if strings.HasPrefix(msg, "invalid argument") {
-		return UsageErr("%s: %s. Run %s --help for an example.", c.CommandPath(), msg, c.CommandPath())
+		return UsageErr("%s: %s. Run %s --help for an example.", displayPath(c), msg, displayPath(c))
 	}
-	return UsageErr("%s. Run %s --help for how to use it.", msg, c.CommandPath())
+	return UsageErr("%s. Run %s --help for how to use it.", msg, displayPath(c))
 }
 
 func closestCommand(c *cobra.Command, word string) string {
