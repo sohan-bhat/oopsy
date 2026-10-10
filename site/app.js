@@ -784,10 +784,11 @@ export async function createInvoice(user, items) {
     return wait(400 + trs.length * 60);
   }
 
-  function dbSnap(stmt, kind, describe) {
+  function dbSnap(stmt, kind, describe, done) {
     dbSeq += 1;
-    dbSnaps.push({ id: dbSeq, stmt, kind, describe, rows: db.rows.map((r) => ({ ...r })), at: Date.now(), restored: false });
-    dbLine(`<span class="y">oops db proxy</span> <span class="d">snapshot before ${esc(kind)} on public.users</span>`, "ln--proxy");
+    dbSnaps.push({ id: dbSeq, stmt, kind, describe, done, rows: db.rows.map((r) => ({ ...r })), at: Date.now(), restored: false });
+    const t = new Date().toTimeString().slice(0, 8);
+    dbLine(`<span class="y">oops db:</span> <span class="d">${t} snapshot before ${esc(kind)} on public.users</span>`, "ln--proxy");
   }
 
   const NO_TABLE = 'ERROR:  relation "users" does not exist';
@@ -799,7 +800,7 @@ export async function createInvoice(user, items) {
     "UPDATE users SET plan = 'free';": async (s) => {
       if (!db.exists) return dbLine(NO_TABLE, "ln--err");
       const n = db.rows.length;
-      dbSnap(s, "UPDATE", `restore the old values of ${n} rows in public.users`);
+      dbSnap(s, "UPDATE", `restore the old values of ${n} rows in public.users`, `${n} rows in public.users set back to their old values`);
       db.rows = db.rows.map((r) => ({ ...r, plan: "free" }));
       dbRender();
       Array.from(dbRowsEl.querySelectorAll("td:last-child")).forEach((td) => td.classList.add("is-changed"));
@@ -808,7 +809,7 @@ export async function createInvoice(user, items) {
     "DELETE FROM users;": async (s) => {
       if (!db.exists) return dbLine(NO_TABLE, "ln--err");
       const n = db.rows.length;
-      dbSnap(s, "DELETE", `put back ${n} rows into public.users`);
+      dbSnap(s, "DELETE", `put back ${n} rows into public.users`, `${n} rows put back into public.users`);
       await dbEraseRows();
       db.rows = [];
       dbRender();
@@ -816,7 +817,7 @@ export async function createInvoice(user, items) {
     },
     "DROP TABLE users;": async (s) => {
       if (!db.exists) return dbLine('ERROR:  table "users" does not exist', "ln--err");
-      dbSnap(s, "DROP TABLE", `recreate table public.users with ${db.rows.length} rows, its indexes and constraints`);
+      dbSnap(s, "DROP TABLE", `recreate table public.users with ${db.rows.length} rows, its indexes and constraints`, `table public.users recreated with ${db.rows.length} rows`);
       await dbEraseRows();
       db.exists = false;
       db.rows = [];
@@ -826,15 +827,21 @@ export async function createInvoice(user, items) {
     "oops db undo": async () => {
       let s = null;
       for (let i = dbSnaps.length - 1; i >= 0; i--) if (!dbSnaps[i].restored) { s = dbSnaps[i]; break; }
-      if (!s) return dbLine("Nothing to undo. The proxy has not saved any changes yet.", "ln--dim");
+      if (!s) return dbLine("Nothing to undo.");
       s.restored = true;
-      dbLine(`<span class="y"><b>Change ${s.id}</b></span>  <span class="d">${ago(s.at)}</span>`);
-      dbLine(`  <span class="d">${esc(s.stmt)}</span>`);
-      dbLine(`  <span class="g">${esc(s.describe)}</span>`);
+      dbLine(`<span class="y"><b>Database change ${s.id}</b></span>  <span class="d">${ago(s.at)}</span>`);
+      dbLine(`  <span class="d">&gt;</span> ${esc(s.stmt)}`);
+      dbLine("", "ln--gap");
+      dbLine("This will:");
+      dbLine(`  ${esc(s.describe)}`);
+      dbLine("", "ln--gap");
+      dbLine(`Restore it? <span class="d">[y/N]</span> y`);
+      await wait(380);
       db.exists = true;
       db.rows = s.rows.map((r) => ({ ...r }));
       dbRender("restore");
-      dbLine(`<span class="g">Restored change ${s.id}.</span>`);
+      dbLine(`  <span class="g">done</span> ${esc(s.done)}`);
+      dbLine(`<span class="g">Restored database change ${s.id}.</span>`);
     },
   };
 
