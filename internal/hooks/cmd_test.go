@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -122,5 +124,91 @@ func TestClinkScript(t *testing.T) {
 	}
 	if got := luaLong("a]]b"); got != "[=[a]]b]=]" {
 		t.Errorf("luaLong: %s", got)
+	}
+}
+
+type fakeAutoRun struct{ v autoRunValue }
+
+func (f *fakeAutoRun) get() (autoRunValue, error) { return f.v, nil }
+func (f *fakeAutoRun) set(v autoRunValue) error {
+	if !v.Exists {
+		v = autoRunValue{}
+	}
+	f.v = v
+	return nil
+}
+
+// TestCmdInstallRoundTrip installs and uninstalls over the AutoRun values
+// people really have and expects each back exactly.
+func TestCmdInstallRoundTrip(t *testing.T) {
+	cases := map[string]autoRunValue{
+		"none":   {},
+		"empty":  {Exists: true},
+		"clink":  {Exists: true, Value: `"C:\Program Files (x86)\clink\clink.bat" inject --autorun`},
+		"expand": {Exists: true, Value: `doskey /macrofile=%USERPROFILE%\m.txt`, Expand: true},
+	}
+	for name, orig := range cases {
+		h := t.TempDir()
+		t.Setenv("HOME", h)
+		t.Setenv("USERPROFILE", h)
+		t.Setenv("OOPS_HOME", filepath.Join(h, ".oops"))
+		t.Setenv("OOPS_CLINK", "none")
+		f := &fakeAutoRun{v: orig}
+		saved := autoRun
+		autoRun = f
+		bk, err := installCmd("oops")
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if bk == "" || !cmdInstalled() {
+			t.Fatalf("%s: not installed (backup %q, value %q)", name, bk, f.v.Value)
+		}
+		if !strings.HasPrefix(f.v.Value, cmdEntry()) || f.v.Expand != orig.Expand {
+			t.Fatalf("%s: value %+v", name, f.v)
+		}
+		for _, p := range []string{cmdAutoRunFile(), cmdHookFile(), cmdCallFile(), cmdMacroFile()} {
+			if _, err := os.Stat(p); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		}
+		// A second init leaves AutoRun alone.
+		before := f.v
+		if _, err := installCmd("oops"); err != nil || f.v != before {
+			t.Fatalf("%s: second install changed AutoRun to %+v (%v)", name, f.v, err)
+		}
+		if _, err := uninstallCmd(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if f.v != orig {
+			t.Fatalf("%s: AutoRun after uninstall %+v, want %+v", name, f.v, orig)
+		}
+		if _, err := os.Stat(cmdDir()); err == nil {
+			t.Fatalf("%s: %s left behind", name, cmdDir())
+		}
+		autoRun = saved
+	}
+}
+
+// TestCmdUninstallAfterOtherChange removes only our entry when another
+// tool changed AutoRun after oops init.
+func TestCmdUninstallAfterOtherChange(t *testing.T) {
+	h := t.TempDir()
+	t.Setenv("HOME", h)
+	t.Setenv("USERPROFILE", h)
+	t.Setenv("OOPS_HOME", filepath.Join(h, ".oops"))
+	t.Setenv("OOPS_CLINK", "none")
+	f := &fakeAutoRun{v: autoRunValue{Exists: true, Value: "cls"}}
+	saved := autoRun
+	autoRun = f
+	defer func() { autoRun = saved }()
+	if _, err := installCmd("oops"); err != nil {
+		t.Fatal(err)
+	}
+	f.v.Value = `"C:\clink\clink.bat" inject --autorun & ` + f.v.Value
+	if _, err := uninstallCmd(); err != nil {
+		t.Fatal(err)
+	}
+	if want := `"C:\clink\clink.bat" inject --autorun & cls`; f.v.Value != want {
+		t.Fatalf("got %q want %q", f.v.Value, want)
 	}
 }
