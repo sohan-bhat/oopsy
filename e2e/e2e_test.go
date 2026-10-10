@@ -559,10 +559,20 @@ func TestInitAndUninstallAreClean(t *testing.T) {
 	if strings.Index(string(sb), `"model"`) > strings.Index(string(sb), `"hooks"`) {
 		t.Fatalf("key order changed:\n%s", sb)
 	}
-	for _, f := range []string{".codex/hooks.json", ".cursor/hooks.json", ".gemini/settings.json"} {
+	post, _ := settings["hooks"].(map[string]any)["PostToolUse"].([]any)
+	if len(post) != 1 || !strings.Contains(string(sb), "hook claude-post") || !strings.Contains(string(sb), "Edit|Write|MultiEdit|NotebookEdit") {
+		t.Fatalf("claude post hook or edit matcher missing:\n%s", sb)
+	}
+	for f, wants := range map[string][]string{
+		".codex/hooks.json":     {`"PreToolUse"`, `"PostToolUse"`, "hook codex-post"},
+		".cursor/hooks.json":    {`"beforeShellExecution"`, `"afterShellExecution"`, `"afterFileEdit"`},
+		".gemini/settings.json": {`"BeforeTool"`, `"AfterTool"`, "hook gemini-post"},
+	} {
 		b, err := os.ReadFile(filepath.Join(e.home, f))
-		if err != nil || !strings.Contains(string(b), "hook ") {
-			t.Errorf("%s missing hook: %v %s", f, err, b)
+		for _, w := range wants {
+			if err != nil || strings.Count(string(b), w) != 1 {
+				t.Errorf("%s: want %s once: %v %s", f, w, err, b)
+			}
 		}
 	}
 	backups, _ := os.ReadDir(filepath.Join(e.oops, "backups"))
