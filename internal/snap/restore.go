@@ -44,6 +44,9 @@ func Plan(s *Snapshot) []PlanLine {
 	for _, g := range s.Git {
 		out = append(out, PlanLine{Path: g.Repo, What: gitPlan(g)})
 	}
+	for _, r := range s.Records {
+		out = append(out, PlanLine{Path: r.Label, What: human(r.Size) + " saved"})
+	}
 	return out
 }
 
@@ -85,6 +88,19 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 			out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: ui.Explain(err)})
 			continue
 		}
+		if e.After != nil && stampMatches(e.Orig, e.After) {
+			// The file is still exactly what the command left, so undo
+			// swaps it for the saved version. The command's version is
+			// kept inside the snapshot, never thrown away.
+			if err := s.setAside(e.Orig); err == nil {
+				if err := pl.place(src, e.Orig); err != nil {
+					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
+				} else {
+					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
+				}
+				continue
+			}
+		}
 		if e.GitRepo != "" && matchesHead(e.GitRepo, e.Orig) {
 			// git put the committed version here; it is still in git, so the
 			// saved uncommitted version can safely take its place.
@@ -104,6 +120,9 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 	}
 	for _, g := range s.Git {
 		out = append(out, restoreGit(s, g))
+	}
+	for _, r := range s.Records {
+		out = append(out, restoreRecord(s, r))
 	}
 	now := time.Now()
 	s.Restored = &now
@@ -141,10 +160,13 @@ type placer struct {
 	linked bool              // saved with hard links, so it can be linked back
 	zstd   bool              // files are stored zstd compressed
 	attrs  map[string]uint32 // attributes recorded for hard linked files
+	mode   os.FileMode       // object entries: the file's own mode and time
+	mtime  int64
 }
 
 func newPlacer(s *Snapshot, e Entry) placer {
-	return placer{root: s.EntryPath(e), linked: e.Method == "hardlink", zstd: e.Method == "zstd copy", attrs: e.Attrs}
+	return placer{root: s.EntryPath(e), linked: e.Method == "hardlink", zstd: e.Method == "zstd copy" || e.Method == "object", attrs: e.Attrs,
+		mode: os.FileMode(e.Mode), mtime: e.Mtime}
 }
 
 // restorePath puts src at dst. When dst exists, directories are merged and
@@ -206,6 +228,13 @@ func (pl placer) place(src, dst string) error {
 	if err != nil {
 		return err
 	}
+	if pl.mode != 0 {
+		_ = os.Chmod(dst, pl.mode)
+	}
+	if pl.mtime != 0 {
+		t := time.Unix(0, pl.mtime)
+		_ = os.Chtimes(dst, t, t)
+	}
 	pl.fixAttrs(src, dst)
 	return skipError(skipped)
 }
@@ -226,6 +255,29 @@ func (pl placer) fixAttrs(src, dst string) {
 			applyAttrs(filepath.Join(dst, filepath.FromSlash(rel[len(base)+1:])), a)
 		}
 	}
+}
+
+func stampMatches(p string, want *Stamp) bool {
+	got := StampOf(p)
+	return got != nil && *got == *want
+}
+
+// setAside moves p into the snapshot's replaced folder, so an undo that
+// swaps a file never loses the version it replaced.
+func (s *Snapshot) setAside(p string) error {
+	dir := filepath.Join(s.Dir(), "replaced")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	dst := filepath.Join(dir, fmt.Sprintf("%d-%s", time.Now().UnixNano(), filepath.Base(p)))
+	if err := os.Rename(p, dst); err == nil {
+		return nil
+	}
+	// Another volume: copy, then remove.
+	if _, err := copyTree(p, dst, cloneFile); err != nil {
+		return err
+	}
+	return os.Remove(p)
 }
 
 func altName(dst string, id int) string {
