@@ -15,18 +15,31 @@ import (
 func dbCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "db",
-		Short: "Undo destructive SQL on Postgres (proxy, wrap, list, undo, prune)",
-		Long: `oops db proxy sits between your app or agent and Postgres. Before DROP TABLE,
-DROP SCHEMA, TRUNCATE, DELETE, UPDATE or ALTER TABLE ... DROP COLUMN runs, it
-copies exactly the affected data into an "oops" schema inside the same
-transaction. oops db undo puts it back.
+		Short: "Undo destructive SQL on Postgres (proxy, wrap, list, undo, prune, protect)",
+		Long: `oops db proxy sits between your app or agent and Postgres. Before a
+destructive statement runs, it copies exactly what is about to be lost into
+an "oops" schema inside the same transaction:
+
+  DELETE, UPDATE, MERGE        the rows they touch
+  INSERT ... ON CONFLICT       the rows an upsert overwrites
+  TRUNCATE                     the whole table
+  DROP TABLE, DROP SCHEMA      data, indexes, constraints and views on them
+  ALTER TABLE ... DROP COLUMN  the column's values
+  DROP VIEW, DROP FUNCTION     the definition (materialized views and
+                               procedures too)
+  DROP DATABASE                a pg_dump of it, kept in ~/.oops/db/dumps
+
+oops db protect adds triggers to the database itself, so changes that skip
+the proxy can be undone too. oops db undo puts things back.
 
 Commands:
   oops db proxy --upstream postgres://... [--listen 127.0.0.1:6543]
   oops db wrap [--upstream url] -- <command>
   oops db list
   oops db undo [id] [-y]
-  oops db prune [--days 7]`,
+  oops db prune [--days 7]
+  oops db protect [--url postgres://...]
+  oops db unprotect [--url postgres://...]`,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bin, err := findDBBinary()

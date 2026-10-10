@@ -78,10 +78,21 @@ func dbCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "oops db",
 		Short: "Undo destructive SQL on Postgres",
-		Long: `oops db proxy sits between your app or agent and Postgres. Before DROP TABLE,
-DROP SCHEMA, TRUNCATE, DELETE, UPDATE or ALTER TABLE ... DROP COLUMN runs, it
-copies exactly the affected data into an "oops" schema inside the same
-transaction. oops db undo puts it back.`,
+		Long: `oops db proxy sits between your app or agent and Postgres. Before a
+destructive statement runs, it copies exactly what is about to be lost into
+an "oops" schema inside the same transaction:
+
+  DELETE, UPDATE, MERGE        the rows they touch
+  INSERT ... ON CONFLICT       the rows an upsert overwrites
+  TRUNCATE                     the whole table
+  DROP TABLE, DROP SCHEMA      data, indexes, constraints and views on them
+  ALTER TABLE ... DROP COLUMN  the column's values
+  DROP VIEW, DROP FUNCTION     the definition (materialized views and
+                               procedures too)
+  DROP DATABASE                a pg_dump of it, kept in ~/.oops/db/dumps
+
+oops db protect adds triggers to the database itself, so changes that skip
+the proxy can be undone too. oops db undo puts things back.`,
 	}
 	c.AddCommand(dbProxyCmd(), dbWrapCmd(), dbListCmd(), dbUndoCmd(), dbPruneCmd(), dbProtectCmd(), dbUnprotectCmd())
 	return c
@@ -395,7 +406,7 @@ func dbUndoCmd() *cobra.Command {
 	var yes bool
 	c := &cobra.Command{
 		Use:   "undo [id]",
-		Short: "Restore the data a statement destroyed (latest by default)",
+		Short: "Restore what a statement destroyed (latest by default; d1, d2 are database dumps)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var id int64
@@ -549,7 +560,7 @@ func dbPruneCmd() *cobra.Command {
 	var days int
 	c := &cobra.Command{
 		Use:   "prune",
-		Short: "Drop database snapshots that were restored or are older than --days",
+		Short: "Drop snapshots and database dumps that were restored or are older than --days",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			age := time.Duration(days) * 24 * time.Hour
