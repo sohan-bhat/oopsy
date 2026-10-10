@@ -76,12 +76,25 @@ func zcopyFile(src, dst string, fi os.FileInfo) error {
 	if err != nil {
 		return err
 	}
-	if err := zcopy(in, out, src); err != nil {
+	if isSparse(src, fi) && !startsWithMagic(in) {
+		// Keep a sparse file sparse as a plain copy with holes: compressing
+		// would mean reading and expanding every hole.
+		err = copySparse(in, out, fi.Size())
+	} else {
+		err = zcopy(in, out, src)
+	}
+	if err != nil {
 		out.Close()
 		os.Remove(dst)
 		return err
 	}
 	return out.Close()
+}
+
+func startsWithMagic(f *os.File) bool {
+	head := make([]byte, 4)
+	n, _ := f.ReadAt(head, 0)
+	return n == 4 && bytes.Equal(head, zstdMagic)
 }
 
 // zcopy streams r into w, compressed when worth it.
@@ -135,21 +148,41 @@ type closeBoth struct {
 
 func (c closeBoth) Close() error { c.z.Close(); return c.f.Close() }
 
-// unzcopyFile writes the original bytes of stored file src to dst.
+// unzcopyFile writes the original bytes of stored file src to dst, keeping
+// runs of zeros as holes.
 func unzcopyFile(src, dst string, fi os.FileInfo) error {
-	in, err := openStored(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	fail := func(err error) error {
 		out.Close()
 		os.Remove(dst)
 		return err
+	}
+	raw, err := os.Open(src)
+	if err != nil {
+		return fail(err)
+	}
+	defer raw.Close()
+	if !startsWithMagic(raw) {
+		// Stored as it was, holes included.
+		if err := copySparse(raw, out, fi.Size()); err != nil {
+			return fail(err)
+		}
+		return out.Close()
+	}
+	in, err := openStored(src)
+	if err != nil {
+		return fail(err)
+	}
+	defer in.Close()
+	w := &holeWriter{f: out}
+	if _, err := io.CopyBuffer(w, in, make([]byte, 1<<20)); err != nil {
+		return fail(err)
+	}
+	if err := w.finish(); err != nil {
+		return fail(err)
 	}
 	return out.Close()
 }
