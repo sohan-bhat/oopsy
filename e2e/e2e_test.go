@@ -123,7 +123,8 @@ func (e *env) guarded(cmd string) string {
 	e.t.Helper()
 	_, hookErr, _ := e.oopsCmd("", "hook", "zsh", "--", cmd)
 	e.sh(cmd)
-	return hookErr
+	_, postErr, _ := e.oopsCmd("", "hook", "zsh-post")
+	return hookErr + postErr
 }
 
 func setTimes(p string, t time.Time) {
