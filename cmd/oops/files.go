@@ -336,7 +336,7 @@ func printTree(root string, limit int) {
 			return filepath.SkipAll
 		}
 		rel, _ := filepath.Rel(root, p)
-		depth := strings.Count(rel, "/")
+		depth := strings.Count(filepath.ToSlash(rel), "/")
 		name := d.Name()
 		if d.IsDir() {
 			name += "/"
