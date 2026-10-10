@@ -130,7 +130,7 @@ func walkProject(root string, limit int) (walkResult, error) {
 					local = append(local, n)
 					continue
 				}
-				n.kind = 'd'
+				n.kind, n.size = 'd', e.size // creation time on Windows, 0 elsewhere
 				local = append(local, n)
 				wg.Add(1)
 				go walk(full, r)
