@@ -17,6 +17,7 @@ const cloneMethod = "clone"
 func cloneTree(src, dst string) error {
 	err := unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW)
 	if err == nil {
+		fixDirTimes(src, dst)
 		return nil
 	}
 	if errors.Is(err, unix.ENOTSUP) || errors.Is(err, unix.EXDEV) || errors.Is(err, unix.EINVAL) {

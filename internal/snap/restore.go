@@ -82,6 +82,18 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 			out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
 			continue
 		}
+		if e.GitRepo != "" && matchesHead(e.GitRepo, e.Orig) {
+			// git put the committed version here; it is still in git, so the
+			// saved uncommitted version can safely take its place.
+			if err := os.Remove(e.Orig); err == nil {
+				if err := place(src, e.Orig); err != nil {
+					out = append(out, Outcome{Path: e.Orig, Status: "failed", Detail: err.Error()})
+				} else {
+					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
+				}
+				continue
+			}
+		}
 		out = append(out, restorePath(src, e.Orig, s.ID)...)
 		if perr == nil && e.ParentMtime != 0 {
 			setMtime(parent, e.ParentMtime)
@@ -214,6 +226,27 @@ func sameContent(a, b string, afi, bfi os.FileInfo) bool {
 			return ea != nil && eb != nil
 		}
 	}
+}
+
+// matchesHead reports whether path exists and is identical to the version
+// committed at HEAD, meaning git can always give it back.
+func matchesHead(repo, path string) bool {
+	if _, err := os.Lstat(path); err != nil {
+		return false
+	}
+	top := gitLine(repo, "rev-parse", "--show-toplevel")
+	if top == "" {
+		return false
+	}
+	rel, err := filepath.Rel(top, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return false
+	}
+	if gitLine(top, "ls-files", "--", rel) == "" {
+		return false
+	}
+	_, err = git(top, "diff", "--quiet", "HEAD", "--", rel)
+	return err == nil
 }
 
 func restoreGit(s *Snapshot, g GitRecord) Outcome {
