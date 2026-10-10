@@ -46,7 +46,7 @@ func TestWatchFootprint(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond) // a fresh status report
 	st := e.readWatchStatus()
 	t.Logf("%s, %d projects of %d files ready in %v; RSS %.1f MB, Go heap %.1f MB",
-		st.Mechanism, len(st.Projects), files, ready.Round(time.Millisecond), mb(st.RSS), mb(st.Heap))
+		st.Mechanism, len(st.Projects), files, ready.Round(time.Millisecond), mib(st.RSS), mib(st.Heap))
 	if st.BaseFiles > 0 {
 		t.Logf("stored versions (hard link disk): %d files, %.1f MB compressed, %.0f bytes per file",
 			st.BaseFiles, float64(st.BaseBytes)/(1<<20), float64(st.BaseBytes)/float64(st.BaseFiles))
@@ -78,10 +78,10 @@ func TestWatchFootprint(t *testing.T) {
 	st = e.readWatchStatus()
 	t.Logf("save to snapshot: mean %v, worst %v (300 ms of it is the debounce); daemon's own last latency %.0f ms",
 		(total / saves).Round(time.Millisecond), worst.Round(time.Millisecond), st.LatencyMs)
-	t.Logf("after %d saves: RSS %.1f MB, Go heap %.1f MB, %d events, %d syncs", saves, mb(st.RSS), mb(st.Heap), st.Events, st.Syncs)
+	t.Logf("after %d saves: RSS %.1f MB, Go heap %.1f MB, %d events, %d syncs", saves, mib(st.RSS), mib(st.Heap), st.Events, st.Syncs)
 	if st.RSS > 100<<20 {
-		t.Errorf("the daemon uses %.1f MB resident", mb(st.RSS))
+		t.Errorf("the daemon uses %.1f MB resident", mib(st.RSS))
 	}
 }
 
-func mb(b uint64) float64 { return float64(b) / (1 << 20) }
+func mib(b uint64) float64 { return float64(b) / (1 << 20) }

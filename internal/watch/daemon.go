@@ -219,7 +219,9 @@ func (d *daemon) work(ctx context.Context) {
 		if res != nil && res.Snapshot != nil && res.Snapshot.ID%100 == 0 {
 			snap.PruneWatch(keepWatch)
 		}
-		if initial || readyNow {
+		// Compressing new versions allocates encoders; give that memory
+		// back to the system rather than keep it for the next save.
+		if initial || readyNow || base.Stored > 0 {
 			debug.FreeOSMemory()
 			d.writeStatus()
 		}
