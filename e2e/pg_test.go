@@ -31,8 +31,8 @@ func findPGBin() string {
 	if p, err := exec.LookPath("pg_ctl"); err == nil {
 		return filepath.Dir(p)
 	}
-	for _, d := range []string{"/usr/local/opt/postgresql@17/bin", "/opt/homebrew/opt/postgresql@17/bin", "/usr/lib/postgresql/17/bin"} {
-		if _, err := os.Stat(filepath.Join(d, "pg_ctl")); err == nil {
+	for _, d := range []string{"/usr/local/opt/postgresql@17/bin", "/opt/homebrew/opt/postgresql@17/bin", "/usr/lib/postgresql/17/bin", os.Getenv("PGBIN")} {
+		if _, err := os.Stat(filepath.Join(d, exe("pg_ctl"))); d != "" && err == nil {
 			return d
 		}
 	}
@@ -60,14 +60,17 @@ func startPG() {
 	}
 	pgDir, _ = os.MkdirTemp("", "oops-pg")
 	data := filepath.Join(pgDir, "data")
-	out, err := exec.Command(filepath.Join(binDir, "initdb"), "-D", data, "-U", "postgres", "-A", "trust", "-E", "UTF8", "--no-locale").CombinedOutput()
+	out, err := exec.Command(filepath.Join(binDir, exe("initdb")), "-D", data, "-U", "postgres", "-A", "trust", "-E", "UTF8", "--no-locale").CombinedOutput()
 	if err != nil {
 		pgErr = fmt.Errorf("initdb: %v %s", err, out)
 		return
 	}
 	port := freePort()
-	pgCtlBin = filepath.Join(binDir, "pg_ctl")
+	pgCtlBin = filepath.Join(binDir, exe("pg_ctl"))
 	opts := fmt.Sprintf("-p %d -k %s -c listen_addresses=127.0.0.1 -c fsync=off", port, pgDir)
+	if onWindows {
+		opts = fmt.Sprintf("-p %d -c listen_addresses=127.0.0.1 -c fsync=off", port)
+	}
 	out, err = exec.Command(pgCtlBin, "-D", data, "-o", opts, "-l", filepath.Join(pgDir, "log"), "-w", "start").CombinedOutput()
 	if err != nil {
 		pgErr = fmt.Errorf("pg_ctl start: %v %s", err, out)
@@ -135,7 +138,12 @@ func (e *env) startProxy(t *testing.T, upstream string) *proxyProc {
 	exited := make(chan struct{})
 	go func() { cmd.Wait(); close(exited) }()
 	t.Cleanup(func() {
-		cmd.Process.Signal(os.Interrupt)
+		if onWindows {
+			// Windows has no interrupt signal to send another process.
+			cmd.Process.Kill()
+		} else {
+			cmd.Process.Signal(os.Interrupt)
+		}
 		select {
 		case <-exited:
 		case <-time.After(5 * time.Second):
@@ -517,7 +525,7 @@ func TestPGWrap(t *testing.T) {
 import ("context";"os";"github.com/jackc/pgx/v5")
 func main(){c,err:=pgx.Connect(context.Background(),os.Getenv("DATABASE_URL"));if err!=nil{panic(err)};_,err=c.Exec(context.Background(),"DELETE FROM events");if err!=nil{panic(err)}}
 `), 0o644)
-	helperBin := filepath.Join(e.home, "client")
+	helperBin := filepath.Join(e.home, exe("client"))
 	build := exec.Command("go", "build", "-o", helperBin, helper)
 	build.Dir, _ = os.Getwd()
 	if out, err := build.CombinedOutput(); err != nil {
