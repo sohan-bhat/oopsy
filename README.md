@@ -71,7 +71,7 @@ Then turn on the hooks once:
 oops init
 ```
 
-This adds a small hook to zsh, bash, fish and PowerShell (Git Bash too on Windows), and hooks before and after each shell command and file edit to Claude Code, Codex CLI, Cursor and Gemini CLI if they are installed. Every file it touches is backed up first, and `oops uninstall` removes it all.
+This adds a small hook to zsh, bash, fish and PowerShell (Git Bash and cmd.exe too on Windows), and hooks before and after each shell command and file edit to Claude Code, Codex CLI, Cursor and Gemini CLI if they are installed. Every file it touches is backed up first, and `oops uninstall` removes it all.
 
 ## Use
 
@@ -110,9 +110,15 @@ Snapshots are saved the cheapest safe way the disk allows:
 * hard links on NTFS and ext4. Also instant and free, since the data stays alive through the snapshot. A hard link shares the file, so a program that writes into a file in place (instead of replacing it) would change the link too. On Linux, Oopsy's shells load a small preload library that copies a mirrored file right before a program first writes into it. Statically linked programs, like most Go binaries, do not load preload libraries.
 * a real copy for overwrites the command line names, where neither works: NTFS compressed on Windows, zstd compressed elsewhere (files that are already compressed are stored as they are). A copy can be any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, at least 2 GB and at most 20 GB, which is about where ext4 keeps space back for root and where macOS and Windows start warning. If a copy would break the floor, Oopsy skips it and tells you right then. Change the floor with `oops config free_floor_gb 4`.
 
-When the folder is on another drive than your home, hard links and clones go to a private store at that drive's root (`D:\.oops` on Windows, readable only by you). Snapshots are pruned after 7 days or past 5 GB (`oops config` to change).
+When the folder is on another drive than your home, hard links and clones go to a private store at that drive's root (`D:\.oops` on Windows, readable only by you). Snapshots are pruned after 7 days or past 5 GB, rebuildable folders after a day (`oops config` to change).
+
+A snapshot that shares the disk with your files cannot survive that disk dying. `oops config store /Volumes/Backup/oops` (or `D:\oops`) puts snapshots, mirrors and objects on another drive instead. Clones and hard links cannot cross drives, so each project then costs one full zstd compressed copy there, plus the changes.
 
 PowerShell has no preexec hook, so Oopsy wraps the function PSReadLine uses to read each line and checks it after you press Enter, before it runs, and runs the after step from the prompt function. The PowerShell parser knows `Remove-Item` and its aliases, `Move-Item`, `Copy-Item`, `Set-Content`, `Out-File`, redirects and pipelines like `Get-ChildItem *.log | Remove-Item`. Agent commands on Windows are read as bash, PowerShell and cmd.exe at once.
+
+cmd.exe has no hook of its own, so `oops init` adds one through the cmd `AutoRun` registry value (keeping any value that was there, and putting it back exactly on `oops uninstall`). With [Clink](https://github.com/chrisant996/clink) installed, a small Lua script checks every line you type, chains and pipes included. Without Clink, doskey macros cover lines that start with `del`, `erase`, `rd`, `rmdir`, `move`, `ren`, `copy`, `xcopy`, `robocopy`, `git`, `npm`, `npx`, `pnpm`, `yarn`, `node`, `python`, `py` or `make`. `cmd /c` and batch files never load either, so scripts and other programs are unaffected. `oops watch` covers the rest after the fact.
+
+On NTFS, Oopsy reads the change journal before walking a project and skips the walk when nothing touched it, which keeps the time before a command low on Windows.
 
 **Agent edit tools.** Claude Code's Edit, Write, MultiEdit and NotebookEdit, Codex's `apply_patch`, and Gemini CLI's `write_file` and `replace` save the file they are about to change, once per version: versions are stored by content hash, zstd compressed, so an identical version costs nothing (a typical source file takes a few hundred bytes to 2 KB, plus about 700 bytes of metadata). `oops` undoes the last edit. Cursor has no hook before an edit, so Oopsy recovers the previous version after it, from the project mirror or by reversing the edit; a full rewrite in Cursor cannot be recovered that way. A file an edit creates is not removed by undo.
 
@@ -135,25 +141,41 @@ The Postgres proxy speaks the wire protocol and parses every statement. Before a
 
 For changes that do not go through the proxy, `oops db protect` (optional, needs a superuser) installs triggers in the database: row triggers keep the old rows of every `DELETE`, `UPDATE` and `TRUNCATE`, and event triggers save tables, views and functions before they are dropped. Each transaction becomes one undo, kept 7 days. It costs about 115 bytes per changed row in bulk statements and about 550 bytes for a single row statement, and slows writes by about 2 times in bulk and 3 to 7 times for single row statements. It does not reverse `INSERT`, `COPY`, `ALTER` or `DROP DATABASE`, or drops run from inside a function. `oops db unprotect` removes the triggers and keeps what they saved.
 
+## What it costs
+
+Measured on GitHub's CI runners for a 10,000 file repository (the numbers in each CI log come from `e2e/cost_test.go`):
+
+| | macOS (APFS clones) | Linux (ext4 hard links) | Windows (NTFS hard links) |
+|---|---|---|---|
+| Mirror metadata per file | about 270 to 530 bytes, plus 40 bytes of index | about 270 bytes, plus 40 bytes of index | about 60 to 200 bytes, plus 40 bytes of index |
+| Added before a command | about 25 ms | about 22 ms | about 15 ms with the change journal, 50 to 85 ms when it has to walk |
+| Read only lines | nothing, skipped in the shell | nothing | nothing |
+| `oops watch` memory, three 10,000 file projects | 24 to 33 MB | 19 to 24 MB | 16 to 17 MB |
+
+An undo costs only what it saves: a deleted file or folder costs nothing extra on any of these disks (clones and hard links), an agent edit a few hundred bytes to a few KB, Kubernetes objects about 1 KB each, Terraform state a few KB, a view definition under 1 KB, and a `DROP DATABASE` dump about 12% of the database.
+
 ## What it does not catch
 
-* With `oops watch` off: a program that writes into a file in place on NTFS, or a statically linked program doing so on ext4. The mirror there uses hard links, which share the file, so Oopsy notices the change but cannot keep the old version, and says so. Editor saves are covered only with watch on.
-* A rebuildable folder like `node_modules` deleted by a program that does not name it anywhere Oopsy can read. Rebuild it.
+* Other machines. Commands run over `ssh` or `rsync` to another host change another computer, so undo there needs Oopsy installed there too.
+* A full disk. Oopsy skips a copy that would leave less free space than its floor (5% of the disk, between 2 and 20 GB) and tells you right then. Clones and hard links never need the room.
+* A dead disk. Snapshots live on the same disk as your files unless you set a store on a second drive with `oops config store`.
+
+And what is only partly covered:
+
+* With `oops watch` off, a program that writes into a file in place on NTFS, or a statically linked program doing so on ext4. The mirror there shares the file through a hard link, so Oopsy notices the change but cannot keep the old version, and says so. Turn on `oops watch` for that, and for editor saves.
+* A rebuildable folder like `node_modules` deleted by a program that never names it anywhere Oopsy can read. Rebuild it.
 * Commands run right in your home folder or a system folder, and projects over 50,000 files: only what the command line names is saved there.
-* Other machines: commands run over `ssh` or `rsync` to another host change another computer, so undo there needs Oopsy installed there too.
-* Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, objects or disks inside cloud resources.
-* Database changes that skip the proxy when `oops db protect` is off. With it on, inserts, `ALTER` statements and drops run from inside a function are still not reversed. `DROP INDEX` is not saved, nor row level security policies, and an `UPDATE` on a table without a primary key is undone by restoring the whole table.
-* Overwrites on a disk without copy on write (NTFS, ext4) when the copy would leave less than the free space floor: Oopsy skips that copy and tells you.
+* Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, objects or disks inside them.
+* Database changes that skip the proxy when `oops db protect` is off. With it on, inserts, `ALTER` statements and drops run from inside a function are still not reversed, and `DROP INDEX` and row level security policies are not saved.
+* Cursor's full file rewrites, and files an agent's edit creates (undo leaves new files alone).
+* Without Clink, cmd.exe lines that start with a command other than the ones listed above.
 * Undoing `git push --force` needs the old commit in your local repo, which it is if you fetched before pushing.
 
-On Windows:
+On Windows also:
 
-* Commands typed into cmd.exe are not hooked (cmd has no hook to run code before a command). Commands agents run through cmd are covered.
 * Files another program holds open without sharing are skipped with a warning.
 * Copies and clones do not keep alternate data streams (such as the downloaded from the internet mark); hard link snapshots do. ACLs come from the folder a file is restored into.
 * Windows PowerShell's default execution policy on desktop Windows blocks profiles; `oops init` and `oops doctor` tell you the one command to allow it.
-
-The Linux reflink and Windows paths are newer and have had less real world use than macOS.
 
 ## Exit codes
 
