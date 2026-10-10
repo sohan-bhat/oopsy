@@ -31,7 +31,7 @@ func dbError(err error, raw string) error {
 			return fmt.Errorf("%s does not have permission for this on %s: %s. Connect as the owner or a superuser", user, where, pgErr.Message)
 		}
 		return fmt.Errorf("Postgres at %s said: %s (code %s)", where, pgErr.Message, pgErr.Code)
-	case errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(err.Error(), "connection refused"):
+	case errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "actively refused"):
 		return fmt.Errorf("could not reach Postgres at %s: nothing is listening there. Start Postgres, or point Oopsy at the right server with --url or OOPS_DATABASE_URL", where)
 	case errors.Is(err, context.DeadlineExceeded) || isTimeout(err):
 		return fmt.Errorf("Postgres at %s did not answer in time. Check that the host is reachable and the server is running", where)

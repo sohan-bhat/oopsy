@@ -48,6 +48,11 @@ func NotFound(format string, a ...any) error {
 	return &exitError{code: ExitNotFound, msg: fmt.Sprintf(format, a...)}
 }
 
+// Partial is a restore that brought back some paths but not all.
+func Partial(format string, a ...any) error {
+	return &exitError{code: ExitPartial, msg: fmt.Sprintf(format, a...)}
+}
+
 // ExitCode picks the exit code for an error.
 func ExitCode(err error) int {
 	var e *exitError
@@ -210,6 +215,7 @@ func distance(a, b string) int {
 	for j := range prev {
 		prev[j] = j
 	}
+	prevPrev := prev
 	for i := 1; i <= len(a); i++ {
 		cur := make([]int, len(b)+1)
 		cur[0] = i
@@ -219,8 +225,11 @@ func distance(a, b string) int {
 				cost = 0
 			}
 			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				cur[j] = min(cur[j], prevPrev[j-2]+1) // swapped letters count once
+			}
 		}
-		prev = cur
+		prevPrev, prev = prev, cur
 	}
 	return prev[len(b)]
 }
