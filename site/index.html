@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oopsy: undo for rm -rf</title>
+<meta name="description" content="Oopsy is an open source CLI that makes destructive commands undoable, for people and AI coding agents. It snapshots your files right before rm -rf, git reset --hard and overwrites, and your Postgres data before DROP TABLE. Type oops and it is back.">
+<meta name="theme-color" content="#F5A7B8">
+<link rel="canonical" href="https://sohan-bhat.github.io/oopsy/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Oopsy">
+<meta property="og:title" content="Oopsy: undo for rm -rf">
+<meta property="og:description" content="Snapshots your files before rm -rf, git reset --hard and overwrites, and your Postgres data before DROP TABLE. Type oops and it is back.">
+<meta property="og:url" content="https://sohan-bhat.github.io/oopsy/">
+<meta property="og:image" content="https://sohan-bhat.github.io/oopsy/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Oopsy. Undo for rm -rf. A terminal shows rm -rf src, then oops restoring 5 files.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Oopsy: undo for rm -rf">
+<meta name="twitter:description" content="Snapshots your files before rm -rf and your Postgres data before DROP TABLE. Type oops and it is back.">
+<meta name="twitter:image" content="https://sohan-bhat.github.io/oopsy/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&family=Unbounded:wght@600;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top__inner">
+    <a class="brand" href="#" aria-label="Oopsy home">
+      <svg class="brand__mark" viewBox="0 0 44 20" aria-hidden="true"><rect x="1" y="2" width="16" height="16" rx="5" fill="#F5A7B8" stroke="#232228" stroke-width="2"/><rect x="15" y="2" width="8" height="16" fill="#C8CAD0" stroke="#232228" stroke-width="2"/><path d="M23 2h15l5 8-5 8H23z" fill="#F6C531" stroke="#232228" stroke-width="2" stroke-linejoin="round"/></svg>
+      <span class="brand__word">oopsy</span>
+    </a>
+    <nav class="top__nav" aria-label="Main">
+      <a href="#try">Try it</a>
+      <a href="#postgres">Postgres</a>
+      <a href="#faq">FAQ</a>
+      <a class="top__gh" href="https://github.com/sohan-bhat/oopsy">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap hero__grid">
+    <div class="hero__copy">
+      <p class="hero__kicker">Open source CLI for macOS and Linux</p>
+      <h1 id="hero-title" class="hero__title">Undo for<br> <code>rm&nbsp;-rf</code>.</h1>
+      <p class="hero__lede">Oopsy snapshots your files the instant before <code>rm -rf</code>, <code>git reset --hard</code> or an overwrite runs, and your Postgres data before <code>DROP TABLE</code>. Whether you typed it or your AI agent did, you type <code>oops</code> and it is back.</p>
+
+      <div class="install" id="install">
+        <div class="install__tabs" role="tablist" aria-label="Install method">
+          <button class="install__tab" role="tab" id="tab-brew" aria-selected="true" aria-controls="panel-install" data-cmd="brew install sohan-bhat/tap/oopsy">Homebrew</button>
+          <button class="install__tab" role="tab" id="tab-curl" aria-selected="false" aria-controls="panel-install" tabindex="-1" data-cmd="curl -fsSL https://raw.githubusercontent.com/sohan-bhat/oopsy/main/install.sh | sh">curl</button>
+        </div>
+        <div class="install__box" id="panel-install" role="tabpanel" aria-labelledby="tab-brew">
+          <code class="install__cmd" id="install-cmd"><span class="install__dollar" aria-hidden="true">$</span><span id="install-text">brew install sohan-bhat/tap/oopsy</span></code>
+          <button class="install__copy" id="install-copy" type="button"><span class="install__copy-label">Copy</span></button>
+        </div>
+        <p class="install__then">Then run <code>oops init</code> once. It hooks your shell and any coding agents it finds.</p>
+        <p class="sr-only" id="copy-status" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="hero__demo" id="try">
+      <div class="term" id="term" aria-label="Interactive demo terminal">
+        <div class="term__bar">
+          <span class="term__title">~/acme-app</span>
+          <div class="term__controls">
+            <button class="switch" id="oopsy-switch" type="button" aria-pressed="true">
+              <span class="switch__track" aria-hidden="true"><span class="switch__knob"></span></span>
+              <span class="switch__label">Oopsy <span class="switch__state">on</span></span>
+            </button>
+            <button class="term__reset" id="term-reset" type="button">Reset</button>
+          </div>
+        </div>
+        <div class="term__body">
+          <div class="tree" aria-label="Project files">
+            <p class="tree__root">acme-app/</p>
+            <ul class="tree__list" id="tree" role="list"></ul>
+          </div>
+          <div class="term__console">
+            <div class="term__out" id="term-out" role="log" aria-live="polite" aria-label="Terminal output" tabindex="0"></div>
+            <form class="term__line" id="term-form" autocomplete="off">
+              <label class="term__prompt" for="term-input"><span class="sr-only">Command</span><span aria-hidden="true">$</span></label>
+              <input class="term__input" id="term-input" type="text" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="go" placeholder="type a command, or tap one below">
+            </form>
+          </div>
+        </div>
+        <div class="chips" id="chips" aria-label="Suggested commands"></div>
+      </div>
+      <p class="demo__note">A simulation in your browser. Go ahead, delete everything.</p>
+    </div>
+  </div>
+</section>
+
+<section class="why" aria-labelledby="why-title">
+  <div class="wrap">
+    <h2 id="why-title" class="h2">Agents run real commands now.</h2>
+    <p class="why__lede">They are fast, they are tireless, and every so often they are confidently wrong.</p>
+    <ul class="incidents" role="list">
+      <li class="incident">
+        <p class="incident__when">July 2025</p>
+        <p class="incident__what">An AI agent on Replit wiped a company's production database in the middle of a code freeze.</p>
+      </li>
+      <li class="incident">
+        <p class="incident__when">2026</p>
+        <p class="incident__what">An agent in Cursor deleted PocketOS's production database, and its backups, in 9 seconds.</p>
+      </li>
+      <li class="incident">
+        <p class="incident__when">In the docs</p>
+        <p class="incident__what">Claude Code's own documentation says its checkpoints do not track files changed by Bash commands.</p>
+      </li>
+    </ul>
+    <p class="why__close">Oopsy catches the command itself, no matter who typed it.</p>
+  </div>
+</section>
+
+<section class="how" aria-labelledby="how-title">
+  <div class="wrap">
+    <h2 id="how-title" class="h2">How it works</h2>
+    <ol class="steps" role="list">
+      <li class="step">
+        <h3 class="step__title">It hooks in</h3>
+        <p><code>oops init</code> adds a small hook to your shell and to your coding agents, so every command passes Oopsy on its way to run.</p>
+      </li>
+      <li class="step">
+        <h3 class="step__title">It snapshots first</h3>
+        <p>When a command is about to destroy files, Oopsy clones them first. Copy on write on APFS and Linux reflinks makes that instant and nearly free on disk.</p>
+      </li>
+      <li class="step">
+        <h3 class="step__title">You type oops</h3>
+        <p><code>oops</code> restores the latest snapshot. <code>oops list</code> shows the rest, and <code>oops undo &lt;id&gt;</code> brings back any one of them.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="pg" id="postgres" aria-labelledby="pg-title">
+  <div class="wrap pg__grid">
+    <div class="pg__copy">
+      <h2 id="pg-title" class="h2">Postgres, too.</h2>
+      <p>Run <code>oops db proxy --upstream postgres://...</code> and point your app or agent at the proxy instead. Before any <code>DROP TABLE</code>, <code>TRUNCATE</code>, <code>DELETE</code> or <code>UPDATE</code> reaches the database, Oopsy saves the rows it is about to touch.</p>
+      <p>Forgot the <code>WHERE</code>? <code>oops db undo</code>.</p>
+    </div>
+    <div class="db" id="db" aria-label="Interactive database demo">
+      <div class="db__bar">
+        <span class="term__title">acme on localhost via oopsy proxy</span>
+        <button class="term__reset" id="db-reset" type="button">Reset</button>
+      </div>
+      <div class="db__table-wrap">
+        <p class="db__caption" id="db-caption">table <strong>users</strong></p>
+        <table class="db__table" id="db-table" aria-describedby="db-caption">
+          <thead><tr><th scope="col">id</th><th scope="col">email</th><th scope="col">plan</th></tr></thead>
+          <tbody id="db-rows"></tbody>
+        </table>
+        <p class="db__empty" id="db-empty" hidden></p>
+      </div>
+      <div class="db__out" id="db-out" role="log" aria-live="polite" aria-label="Database console output" tabindex="0"></div>
+      <div class="chips chips--db" id="db-chips" aria-label="Database commands"></div>
+    </div>
+  </div>
+</section>
+
+<section class="fit" aria-labelledby="fit-title">
+  <div class="wrap fit__grid">
+    <div>
+      <h2 id="fit-title" class="h2">Works with</h2>
+      <dl class="works">
+        <div class="works__row"><dt>Shells</dt><dd><span>zsh</span><span>bash</span><span>fish</span></dd></div>
+        <div class="works__row"><dt>Agents</dt><dd><span>Claude Code</span><span>Codex</span><span>Cursor</span><span>Gemini CLI</span></dd></div>
+        <div class="works__row"><dt>Databases</dt><dd><span>Postgres</span></dd></div>
+        <div class="works__row"><dt>Systems</dt><dd><span>macOS</span><span>Linux</span></dd></div>
+      </dl>
+    </div>
+    <div>
+      <h2 class="h2">What it does not catch</h2>
+      <ul class="limits" role="list" id="limits">
+        <li>Commands that never pass through a hooked shell or agent, like cron jobs, GUI apps or a program deleting files on its own.</li>
+        <li>Deletes buried inside a script. Oopsy sees <code>./cleanup.sh</code>, not the <code>rm</code> inside it.</li>
+        <li>Remote servers and network drives. It protects the disk it runs on.</li>
+        <li>Database writes that skip the proxy, and databases other than Postgres.</li>
+        <li>A dead disk. Snapshots live next to your files, so keep a real backup too.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="faq" id="faq" aria-labelledby="faq-title">
+  <div class="wrap faq__wrap">
+    <h2 id="faq-title" class="h2">Questions</h2>
+    <div class="faq__list">
+      <details class="qa">
+        <summary>Why not just Ctrl+Z?</summary>
+        <p>Undo lives inside your editor. <code>rm</code>, <code>git</code> and your database never ask your editor first, so once a file is gone from disk there is no history to step back through. In a terminal, Ctrl+Z only suspends the running job.</p>
+      </details>
+      <details class="qa">
+        <summary>Why not git?</summary>
+        <p>Git protects what you committed. Uncommitted edits, untracked files, <code>.env</code> and everything in <code>.gitignore</code> are exactly what <code>rm -rf</code> and <code>git reset --hard</code> wipe out. Oopsy covers the work between commits.</p>
+      </details>
+      <details class="qa">
+        <summary>Why not Time Machine?</summary>
+        <p>Time Machine runs about once an hour, to another disk, and getting a folder back means scrolling through a timeline. Oopsy snapshots the exact moment before the command and restores in one word. Keep both.</p>
+      </details>
+      <details class="qa">
+        <summary>How much disk does it use?</summary>
+        <p>On APFS and on Linux filesystems with reflinks, like Btrfs and XFS, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On other filesystems Oopsy falls back to a regular copy. <code>oops list</code> shows what is kept.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot__inner">
+    <div class="foot__cta">
+      <p class="foot__big">Make your next mistake <span>a small one.</span></p>
+      <a class="btn" href="#install">Install Oopsy</a>
+      <a class="btn btn--ghost" href="https://github.com/sohan-bhat/oopsy">View on GitHub</a>
+    </div>
+    <div class="foot__meta">
+      <span class="brand brand--foot"><svg class="brand__mark" viewBox="0 0 44 20" aria-hidden="true"><rect x="1" y="2" width="16" height="16" rx="5" fill="#F5A7B8" stroke="#FBFBFA" stroke-width="2"/><rect x="15" y="2" width="8" height="16" fill="#C8CAD0" stroke="#FBFBFA" stroke-width="2"/><path d="M23 2h15l5 8-5 8H23z" fill="#F6C531" stroke="#FBFBFA" stroke-width="2" stroke-linejoin="round"/></svg><span class="brand__word">oopsy</span></span>
+      <p>Open source under the MIT license. <a href="https://github.com/sohan-bhat/oopsy">github.com/sohan-bhat/oopsy</a></p>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+</body>
+</html>
