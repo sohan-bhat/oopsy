@@ -154,7 +154,9 @@ button { font: inherit; color: inherit; }
   border-radius: 0 10px 10px 0; min-width: 88px;
 }
 @media (max-width: 480px) {
-  .install__cmd { white-space: normal; overflow-wrap: anywhere; font-size: 13.5px; align-items: flex-start; }
+  .install__cmd { white-space: normal; font-size: 13.5px; align-items: flex-start; }
+  .install__cmd .w { white-space: nowrap; }
+  .install__cmd .w--url { white-space: normal; overflow-wrap: anywhere; }
   .install__copy { min-width: 76px; padding: 0 14px; }
 }
 .install__copy:hover { background: #ffd24d; }

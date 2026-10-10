@@ -22,7 +22,7 @@
       t.setAttribute("aria-selected", String(on));
       t.tabIndex = on ? 0 : -1;
     });
-    installText.textContent = tab.dataset.cmd;
+    renderCmd(tab.dataset.cmd);
     panel.setAttribute("aria-labelledby", tab.id);
     resetCopy();
     if (focus) tab.focus();
@@ -37,6 +37,19 @@
       }
     });
   });
+
+  // Wrap only between words, so a narrow screen never splits sohan-bhat at its hyphen.
+  function renderCmd(cmd) {
+    installText.textContent = "";
+    cmd.split(" ").forEach((word, i) => {
+      if (i) installText.appendChild(document.createTextNode(" "));
+      const span = document.createElement("span");
+      span.className = word.includes("://") ? "w w--url" : "w";
+      span.textContent = word;
+      installText.appendChild(span);
+    });
+  }
+  renderCmd(tabs[0].dataset.cmd);
 
   let copyTimer;
   function resetCopy() {
@@ -63,7 +76,8 @@
     }
   }
   copyBtn.addEventListener("click", async () => {
-    const ok = await copyText(installText.textContent);
+    const current = tabs.find((t) => t.getAttribute("aria-selected") === "true");
+    const ok = await copyText(current.dataset.cmd);
     copyLabel.textContent = ok ? "Copied" : "Select it";
     copyBtn.classList.toggle("is-copied", ok);
     copyStatus.textContent = ok ? "Install command copied to clipboard" : "Copy failed. Select the command and copy it manually.";
