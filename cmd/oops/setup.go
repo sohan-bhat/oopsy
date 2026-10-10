@@ -287,7 +287,7 @@ func doctorCmd() *cobra.Command {
 			}
 			fast, slow := hookSpeed()
 			label := fmt.Sprintf("median %.1f ms for a harmless command, %.1f ms for git status", fast, slow)
-			if fast > 20 {
+			if fast > 50 {
 				warnf("hook speed", label)
 			} else {
 				ok("hook speed", label)

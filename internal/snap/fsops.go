@@ -12,6 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// forceCopy disables copy on write clones (used to measure the fallback).
+var forceCopy = os.Getenv("OOPS_FORCE_COPY") != ""
+
 // errNoClone means the filesystem cannot make copy on write clones here.
 var errNoClone = errors.New("copy on write clones are not supported here")
 

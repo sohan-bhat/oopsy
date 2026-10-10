@@ -15,6 +15,9 @@ const cloneMethod = "clone"
 // cloneTree makes an APFS copy on write clone of src at dst. Directories are
 // cloned recursively by the kernel in one call.
 func cloneTree(src, dst string) error {
+	if forceCopy {
+		return errNoClone
+	}
 	err := unix.Clonefile(src, dst, unix.CLONE_NOFOLLOW)
 	if err == nil {
 		fixDirTimes(src, dst)
