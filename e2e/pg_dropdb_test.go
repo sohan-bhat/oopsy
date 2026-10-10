@@ -88,8 +88,8 @@ func TestPGDropDatabaseUndo(t *testing.T) {
 	  FROM generate_series(1, 200000) g;
 	  CREATE INDEX accounts_email ON accounts (email);
 	  CREATE INDEX accounts_created ON accounts (created_at);
-	  COMMENT ON DATABASE ` + name + ` IS 'the app';
-	  ALTER DATABASE ` + name + ` SET work_mem = '8MB';
+	  COMMENT ON DATABASE `+name+` IS 'the app';
+	  ALTER DATABASE `+name+` SET work_mem = '8MB';
 	  SELECT setval('users_id_seq', 777);`)
 	exec1(t, direct, "VACUUM ANALYZE accounts")
 	size := scalar[int64](t, direct, "SELECT pg_database_size(current_database())")
