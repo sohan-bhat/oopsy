@@ -131,7 +131,8 @@ func (e *env) waitWatchSnap(t *testing.T, after int, path string) watchSnapMeta 
 				continue
 			}
 			var s watchSnapMeta
-			if json.Unmarshal(b, &s) != nil || s.Source != "watch" {
+			// "watch" is the placeholder until the daemon names the files.
+			if json.Unmarshal(b, &s) != nil || s.Source != "watch" || s.Command == "watch" {
 				continue
 			}
 			for _, en := range s.Entries {
