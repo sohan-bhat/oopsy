@@ -3,3 +3,6 @@
 *.test
 *.out
 .DS_Store
+/oops-db
+/oops.exe
+/oops-db.exe
