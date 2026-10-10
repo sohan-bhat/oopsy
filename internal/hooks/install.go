@@ -359,8 +359,8 @@ func hookCommand(bin, name string) string {
 	return shQuote(bin) + " hook " + name
 }
 
-// agentMatcher is the Claude Code and Codex tool matcher. Claude Code on
-// Windows can also run commands with a PowerShell tool.
+// agentMatcher is the Claude Code and Codex shell tool matcher. Claude
+// Code on Windows can also run commands with a PowerShell tool.
 func agentMatcher() string {
 	if runtime.GOOS == "windows" {
 		return "Bash|PowerShell"
@@ -368,42 +368,62 @@ func agentMatcher() string {
 	return "Bash"
 }
 
+// Edit tools are snapshotted file by file before they write. Codex reports
+// its file edits as the apply_patch tool.
+const (
+	claudeEditTools = "Edit|Write|MultiEdit|NotebookEdit"
+	codexEditTools  = "apply_patch"
+	geminiTools     = "^(run_shell_command|write_file|replace)$"
+)
+
+// agentEvents are the hook events each agent gets, as event and source
+// suffix pairs: the pre events call oops hook <agent>, the post events
+// oops hook <agent>-post.
+var agentEvents = map[string][][2]string{
+	"claude": {{"PreToolUse", ""}, {"PostToolUse", "-post"}},
+	"codex":  {{"PreToolUse", ""}, {"PostToolUse", "-post"}},
+	"gemini": {{"BeforeTool", ""}, {"AfterTool", "-post"}},
+	"cursor": {{"beforeShellExecution", ""}, {"afterShellExecution", "-post"}, {"afterFileEdit", "-post"}},
+}
+
 func addAgentHook(o *obj, name, bin string) {
-	cmd := hookCommand(bin, name)
-	switch name {
-	case "claude", "codex":
-		h := o.child("hooks")
-		list, _ := h.vals["PreToolUse"].([]any)
-		entry := newObj()
-		entry.set("matcher", agentMatcher())
-		hk := newObj()
-		hk.set("type", "command")
-		hk.set("command", cmd)
-		hk.set("timeout", 120)
-		entry.set("hooks", []any{hk})
-		h.set("PreToolUse", append(list, entry))
-	case "gemini":
-		h := o.child("hooks")
-		list, _ := h.vals["BeforeTool"].([]any)
-		entry := newObj()
-		entry.set("matcher", "run_shell_command")
-		hk := newObj()
-		hk.set("name", "oopsy")
-		hk.set("type", "command")
-		hk.set("command", cmd)
-		hk.set("timeout", 120000)
-		entry.set("hooks", []any{hk})
-		h.set("BeforeTool", append(list, entry))
-	case "cursor":
+	if name == "cursor" {
 		if _, ok := o.get("version"); !ok {
 			o.set("version", 1)
 		}
-		h := o.child("hooks")
-		list, _ := h.vals["beforeShellExecution"].([]any)
+	}
+	h := o.child("hooks")
+	for _, ev := range agentEvents[name] {
+		cmd := hookCommand(bin, name+ev[1])
+		list, _ := h.vals[ev[0]].([]any)
 		hk := newObj()
-		hk.set("command", cmd)
-		hk.set("timeout", 120)
-		h.set("beforeShellExecution", append(list, hk))
+		var entry *obj
+		switch name {
+		case "claude", "codex":
+			matcher := agentMatcher() + "|" + claudeEditTools
+			if name == "codex" {
+				matcher = agentMatcher() + "|" + codexEditTools
+			}
+			entry = newObj()
+			entry.set("matcher", matcher)
+			hk.set("type", "command")
+			hk.set("command", cmd)
+			hk.set("timeout", 120)
+		case "gemini":
+			entry = newObj()
+			entry.set("matcher", geminiTools)
+			hk.set("name", "oopsy")
+			hk.set("type", "command")
+			hk.set("command", cmd)
+			hk.set("timeout", 120000)
+		case "cursor":
+			hk.set("command", cmd)
+			hk.set("timeout", 120)
+			h.set(ev[0], append(list, hk))
+			continue
+		}
+		entry.set("hooks", []any{hk})
+		h.set(ev[0], append(list, entry))
 	}
 }
 
@@ -421,8 +441,25 @@ func removeAgentHook(o *obj, name string) {
 	if !ok {
 		return
 	}
-	event := map[string]string{"claude": "PreToolUse", "codex": "PreToolUse", "gemini": "BeforeTool", "cursor": "beforeShellExecution"}[name]
-	list, _ := h.vals[event].([]any)
+	for _, ev := range agentEvents[name] {
+		removeFromEvent(h, ev[0], name)
+	}
+	if len(h.keys) == 0 {
+		o.del("hooks")
+	}
+	if name == "cursor" && len(o.keys) == 1 {
+		if _, ok := o.vals["version"]; ok {
+			o.del("version")
+		}
+	}
+}
+
+// removeFromEvent drops our hooks from one event list, keeping the rest.
+func removeFromEvent(h *obj, event, name string) {
+	list, ok := h.vals[event].([]any)
+	if !ok {
+		return
+	}
 	var kept []any
 	for _, item := range list {
 		if name == "cursor" {
@@ -455,13 +492,5 @@ func removeAgentHook(o *obj, name string) {
 		h.del(event)
 	} else {
 		h.set(event, kept)
-	}
-	if len(h.keys) == 0 {
-		o.del("hooks")
-	}
-	if name == "cursor" && len(o.keys) == 1 {
-		if _, ok := o.vals["version"]; ok {
-			o.del("version")
-		}
 	}
 }

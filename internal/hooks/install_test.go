@@ -64,3 +64,91 @@ func TestPowerShellInitQuoting(t *testing.T) {
 		t.Fatal("hook does not wrap PSConsoleHostReadLine")
 	}
 }
+
+// TestAgentHooksRoundTrip installs every agent's pre and post hooks next to
+// the user's own, twice, and expects uninstall to leave only theirs.
+func TestAgentHooksRoundTrip(t *testing.T) {
+	user := map[string]string{
+		"claude": `{"model":"opus","hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"my-linter"}]}],"PostToolUse":[{"matcher":"Write","hooks":[{"type":"command","command":"prettier"}]}]}}`,
+		"codex":  `{"hooks":{"PostToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"log-it"}]}]}}`,
+		"gemini": `{"theme":"dark","hooks":{"AfterTool":[{"matcher":"read_file","hooks":[{"name":"x","type":"command","command":"audit"}]}]}}`,
+		"cursor": `{"version":1,"hooks":{"afterFileEdit":[{"command":"format.sh"}]}}`,
+	}
+	want := map[string][]string{
+		"claude": {"PreToolUse", "PostToolUse"},
+		"codex":  {"PreToolUse", "PostToolUse"},
+		"gemini": {"BeforeTool", "AfterTool"},
+		"cursor": {"beforeShellExecution", "afterShellExecution", "afterFileEdit"},
+	}
+	for name, orig := range user {
+		p := filepath.Join(t.TempDir(), "settings.json")
+		os.WriteFile(p, []byte(orig), 0o644)
+		for i := 0; i < 2; i++ {
+			if err := editJSON(p, func(o *obj) { removeAgentHook(o, name); addAgentHook(o, name, "/usr/local/bin/oops") }); err != nil {
+				t.Fatal(err)
+			}
+		}
+		b, _ := os.ReadFile(p)
+		text := string(b)
+		for _, ev := range want[name] {
+			if !strings.Contains(text, `"`+ev+`"`) {
+				t.Errorf("%s: no %s hook:\n%s", name, ev, text)
+			}
+		}
+		if n := strings.Count(text, " hook "+name+"-post"); n != len(want[name])-1 {
+			t.Errorf("%s: %d post hooks, want %d:\n%s", name, n, len(want[name])-1, text)
+		}
+		if n := strings.Count(text, " hook "+name+`"`); n != 1 {
+			t.Errorf("%s: %d pre hooks, want 1:\n%s", name, n, text)
+		}
+		switch name {
+		case "claude":
+			if !strings.Contains(text, "Bash|Edit|Write|MultiEdit|NotebookEdit") && !strings.Contains(text, "Bash|PowerShell|Edit|Write|MultiEdit|NotebookEdit") {
+				t.Errorf("claude matcher misses edit tools:\n%s", text)
+			}
+		case "codex":
+			if !strings.Contains(text, "apply_patch") {
+				t.Errorf("codex matcher misses apply_patch:\n%s", text)
+			}
+		case "gemini":
+			if !strings.Contains(text, "write_file|replace") {
+				t.Errorf("gemini matcher misses edit tools:\n%s", text)
+			}
+		}
+		if err := editJSON(p, func(o *obj) { removeAgentHook(o, name) }); err != nil {
+			t.Fatal(err)
+		}
+		b, _ = os.ReadFile(p)
+		got, _ := parseObj(b)
+		exp, _ := parseObj([]byte(orig))
+		gb, _ := got.MarshalJSON()
+		eb, _ := exp.MarshalJSON()
+		if string(gb) != string(eb) {
+			t.Errorf("%s: not restored:\n%s\nwant\n%s", name, gb, eb)
+		}
+	}
+}
+
+func TestPatchPaths(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: src/a.go\n@@\n-x\n+y\n*** Add File: b.txt\n+hi\n*** Delete File: c.txt\n*** Update File: d.go\n*** Move to: e.go\n*** End Patch\n"
+	got := strings.Join(patchPaths(patch), ",")
+	if got != "src/a.go,b.txt,c.txt,d.go,e.go" {
+		t.Fatalf("patchPaths = %s", got)
+	}
+}
+
+func TestReverseEdits(t *testing.T) {
+	cur := []byte("func a() {\n\treturn 2\n}\nfunc b() {}\n")
+	edits := []edit{{OldString: "return 1", NewString: "return 2"}, {OldString: "func c() {}", NewString: "func b() {}"}}
+	prev, ok := reverseEdits(cur, edits)
+	if !ok || string(prev) != "func a() {\n\treturn 1\n}\nfunc c() {}\n" {
+		t.Fatalf("reverse = %q %v", prev, ok)
+	}
+	if out, ok := applyEdits(prev, edits); !ok || !bytes.Equal(out, cur) {
+		t.Fatalf("forward = %q %v", out, ok)
+	}
+	// A replacement that occurs twice cannot be located.
+	if _, ok := reverseEdits([]byte("x x"), []edit{{OldString: "y", NewString: "x"}}); ok {
+		t.Fatal("ambiguous edit reversed")
+	}
+}
