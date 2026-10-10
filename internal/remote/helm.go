@@ -226,8 +226,8 @@ func captureHelm(dir string, t tool, h helmSpec, kind, rel string) (*snap.Record
 	if ns == "" {
 		ns = nsOf(items[0])
 	}
-	// The live resources, with Helm's labels and field owners, so they come
-	// back exactly as Helm left them. The manifest is the fallback.
+	// The live resources, with Helm's labels and annotations, so they come
+	// back as Helm left them. The manifest is the fallback.
 	if strings.TrimSpace(latest.Manifest) != "" {
 		out, err := t.run(captureTimeout, strings.NewReader(latest.Manifest), nil, "get", "--namespace="+ns, "--filename=-", "--output=json", "--ignore-not-found")
 		if live, perr := parseItems(out); err == nil && perr == nil && len(live) > 0 {
@@ -262,7 +262,7 @@ func restoreHelm(s *snap.Snapshot, r snap.Record) snap.Outcome {
 	var errs []string
 	manifest := filepath.Join(dir, "manifest.yaml")
 	if live, err := readItems(filepath.Join(dir, "resources.json")); err == nil {
-		res := putBack(t, dir, live, false, true)
+		res := putBack(t, dir, live, false, "helm")
 		errs = append(errs, res.errors...)
 		parts = append(parts, res.summary("recreated"))
 	} else if b, _ := os.ReadFile(manifest); len(bytes.TrimSpace(b)) > 0 {
@@ -281,7 +281,7 @@ func restoreHelm(s *snap.Snapshot, r snap.Record) snap.Outcome {
 		_, _ = t.run(restoreTimeout, nil, nil, "annotate", "--namespace="+st.Namespace, "--filename="+manifest, "--overwrite",
 			"meta.helm.sh/release-name="+st.Release, "meta.helm.sh/release-namespace="+st.Namespace)
 	}
-	rep := putBack(t, dir, items, true, false)
+	rep := putBack(t, dir, items, true, "")
 	errs = append(errs, rep.errors...)
 	if len(rep.errors) == 0 {
 		parts = append([]string{fmt.Sprintf("release %s is back in helm list at revision %d", st.Release, st.Revision)}, parts...)

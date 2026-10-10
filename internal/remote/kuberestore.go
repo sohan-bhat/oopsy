@@ -27,7 +27,7 @@ func restoreKube(s *snap.Snapshot, r snap.Record) snap.Outcome {
 	if err != nil {
 		return fail(err.Error())
 	}
-	rep := putBack(st.Tool, dir, items, st.Mode != "delete", false)
+	rep := putBack(st.Tool, dir, items, st.Mode != "delete", "")
 	var parts []string
 	if st.Mode == "delete" {
 		parts = append(parts, rep.summary("recreated"))
@@ -95,9 +95,10 @@ func (r report) summary(verb string) string {
 // also puts back the saved version of objects that exist. Objects that a
 // controller owns are left to it, since recreating them by hand would
 // fight the controller.
-// With keepOwners the saved field owners (managedFields) go back too, so
-// tools that use server side apply, such as Helm 4, keep owning their fields.
-func putBack(t tool, dir string, items []map[string]any, replace, keepOwners bool) report {
+// With a manager, missing objects are created by server side apply under
+// that field manager instead, so the tool that made them (Helm 4 applies as
+// "helm") owns their fields again and its next apply has no conflicts.
+func putBack(t tool, dir string, items []map[string]any, replace bool, manager string) report {
 	var rep report
 	var cands []map[string]any
 	for _, it := range items {
@@ -122,9 +123,6 @@ func putBack(t tool, dir string, items []map[string]any, replace, keepOwners boo
 		switch {
 		case !ok:
 			c := cleanObj(it, true)
-			if mf := metaOf(it)["managedFields"]; keepOwners && mf != nil {
-				metaOf(c)["managedFields"] = mf
-			}
 			if k := kindOf(c); k == "Namespace" || k == "CustomResourceDefinition" {
 				first = append(first, c)
 			} else {
@@ -140,7 +138,11 @@ func putBack(t tool, dir string, items []map[string]any, replace, keepOwners boo
 	}
 	api := apiCache{}
 	for _, batch := range [][]map[string]any{first, rest} {
-		ok, errs := kubeSend(t, api, "create", batch)
+		verb := "create"
+		if manager != "" {
+			verb = "apply:" + manager
+		}
+		ok, errs := kubeSend(t, api, verb, batch)
 		rep.errors = append(rep.errors, errs...)
 		for _, it := range ok {
 			rep.created = append(rep.created, objRef(it))
@@ -163,6 +165,15 @@ func putBack(t tool, dir string, items []map[string]any, replace, keepOwners boo
 // object exactly as it was.
 func kubeSend(t tool, api apiCache, verb string, objs []map[string]any) (ok []map[string]any, errs []string) {
 	for _, it := range objs {
+		if m, ok2 := strings.CutPrefix(verb, "apply:"); ok2 {
+			data, _ := json.Marshal(it)
+			if _, err := t.run(restoreTimeout, bytes.NewReader(data), nil, "apply", "--server-side", "--force-conflicts", "--field-manager="+m, "--filename=-"); err != nil {
+				errs = append(errs, objRef(it)+": "+err.Error())
+			} else {
+				ok = append(ok, it)
+			}
+			continue
+		}
 		path, err := api.path(t, it)
 		if err != nil {
 			errs = append(errs, objRef(it)+": "+err.Error())
@@ -176,29 +187,9 @@ func kubeSend(t tool, api apiCache, verb string, objs []map[string]any) (ok []ma
 			errs = append(errs, objRef(it)+": "+err.Error())
 			continue
 		}
-		if mf := metaOf(it)["managedFields"]; mf != nil && verb == "create" {
-			// The server adds kubectl as an owner of everything it created;
-			// setting the saved owners again leaves exactly those.
-			patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"managedFields": mf}})
-			args := []string{"patch", api.resource(it) + "/" + nameOf(it), "--type=merge", "--patch=" + string(patch)}
-			if ns := nsOf(it); ns != "" {
-				args = append(args, "--namespace="+ns)
-			}
-			_, _ = t.run(restoreTimeout, nil, nil, args...)
-		}
 		ok = append(ok, it)
 	}
 	return ok, errs
-}
-
-// resource names an object's type for kubectl, such as deployments.apps.
-func (c apiCache) resource(it map[string]any) string {
-	av, _ := it["apiVersion"].(string)
-	r := c[av][kindOf(it)]
-	if i := strings.LastIndex(av, "/"); i >= 0 {
-		return r.Name + "." + av[:i]
-	}
-	return r.Name
 }
 
 // apiCache maps each apiVersion to its resources, read once from the API
