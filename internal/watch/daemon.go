@@ -213,12 +213,8 @@ func (d *daemon) work(ctx context.Context) {
 		if rs := d.roots[root]; rs != nil {
 			rs.started = true
 		}
-		ready := true
-		for _, rs := range d.roots {
-			ready = ready && rs.started
-		}
-		readyNow := ready && !d.st.Ready
-		d.st.Ready = ready
+		readyNow := d.allStarted() && !d.st.Ready
+		d.st.Ready = d.allStarted()
 		d.mu.Unlock()
 		if res != nil && res.Snapshot != nil && res.Snapshot.ID%100 == 0 {
 			snap.PruneWatch(keepWatch)
@@ -257,6 +253,17 @@ func (d *daemon) next() (root string, first time.Time, initial bool) {
 	return "", now, false
 }
 
+// allStarted reports whether every project has had its first sync. The
+// caller holds mu.
+func (d *daemon) allStarted() bool {
+	for _, rs := range d.roots {
+		if !rs.started {
+			return false
+		}
+	}
+	return true
+}
+
 func (d *daemon) note(s string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -273,6 +280,7 @@ func (d *daemon) writeStatus() {
 	d.st.Updated = time.Now()
 	d.st.Heap = ms.HeapInuse
 	d.st.RSS = selfRSS()
+	d.st.Ready = d.allStarted()
 	st := d.st
 	st.Projects = append([]string(nil), d.st.Projects...)
 	d.mu.Unlock()
