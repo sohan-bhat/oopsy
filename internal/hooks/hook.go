@@ -80,7 +80,7 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 	}
 	s, err := snap.Create(cmd, cwd, source, res.Actions)
 	if err != nil {
-		fmt.Fprintf(stderr, "%s could not save a snapshot: %v\n", ui.ErrWarn("oops:"), err)
+		fmt.Fprintf(stderr, "%s could not save a snapshot: %s\n", ui.ErrWarn("oops:"), ui.Explain(err))
 		return 0
 	}
 	if s == nil {

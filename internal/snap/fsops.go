@@ -139,7 +139,7 @@ func skipReason(err error) string {
 	case isLocked(err):
 		return "in use by another program, so it could not be read"
 	case errors.Is(err, fs.ErrPermission):
-		return "permission denied"
+		return "you do not have permission to read it"
 	}
 	var pe *fs.PathError
 	if errors.As(err, &pe) {
