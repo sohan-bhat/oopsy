@@ -543,7 +543,20 @@ func restoreColumn(ctx context.Context, tx pgx.Tx, e Entry) (string, error) {
 			return "", err
 		}
 	}
-	return fmt.Sprintf("column %s added back to %s.%s, %d values refilled", e.Column, e.Schema, e.Table, tag.RowsAffected()), nil
+	extra := ""
+	failed := 0
+	for _, stmt := range e.DDLPost {
+		if err := savepointExec(ctx, tx, stmt); err != nil {
+			failed++
+		}
+	}
+	if n := len(e.DDLPost) - failed; n > 0 {
+		extra = fmt.Sprintf(", %d dependent constraints, indexes or views recreated", n)
+	}
+	if failed > 0 {
+		extra += fmt.Sprintf(", %d could not be recreated", failed)
+	}
+	return fmt.Sprintf("column %s added back to %s.%s, %d values refilled%s", e.Column, e.Schema, e.Table, tag.RowsAffected(), extra), nil
 }
 
 // Prune drops snapshot tables of changes older than the cutoff or already restored.
