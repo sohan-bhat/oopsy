@@ -23,6 +23,11 @@ func TestPlanKinds(t *testing.T) {
 		{"WITH d AS (DELETE FROM logs RETURNING *) SELECT count(*) FROM d", "nested DML", []string{`snap_table(E'"logs"'`}, false},
 		{"MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE", "MERGE", []string{`snap_table(E'"t"'`}, false},
 		{"DELETE FROM \"Weird \"\"Name\" WHERE note = 'it''s'", "DELETE", []string{`"Weird ""Name"`, `it''s`}, false},
+		{"DROP VIEW IF EXISTS app.v, w CASCADE", "DROP VIEW", []string{`snap_drop_view(E'"app"."v"'`, `snap_drop_view(E'"w"'`}, false},
+		{"DROP MATERIALIZED VIEW mv", "DROP MATERIALIZED VIEW", []string{`snap_drop_view(E'"mv"'`}, false},
+		{"DROP FUNCTION s.f(int, character varying(10), OUT x text)", "DROP FUNCTION", []string{`snap_drop_routine(E'"s"."f"(int, varchar(10))'`}, false},
+		{"DROP FUNCTION g CASCADE", "DROP FUNCTION", []string{`snap_drop_routine(E'"g"'`}, false},
+		{"DROP PROCEDURE p(IN a int)", "DROP PROCEDURE", []string{`snap_drop_routine(E'"p"(int)'`}, false},
 	}
 	for _, c := range cases {
 		plans, err := Plan(c.sql)

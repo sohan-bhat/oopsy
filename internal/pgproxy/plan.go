@@ -150,6 +150,32 @@ func planStmt(n *pg.Node, text string) *StmtPlan {
 				p.Targets = append(p.Targets, name)
 				p.Snaps = append(p.Snaps, SnapSQL{SQL: fmt.Sprintf("SELECT oops.snap_drop_schema(%s, %s, %s)", lit(name), lit(grp), dollar(text))})
 			}
+		case pg.ObjectType_OBJECT_VIEW, pg.ObjectType_OBJECT_MATVIEW:
+			p.Kind = "DROP VIEW"
+			if d.RemoveType == pg.ObjectType_OBJECT_MATVIEW {
+				p.Kind = "DROP MATERIALIZED VIEW"
+			}
+			for _, o := range d.Objects {
+				rel := nameListText(o)
+				if rel == "" {
+					continue
+				}
+				p.Targets = append(p.Targets, rel)
+				p.Snaps = append(p.Snaps, SnapSQL{SQL: fmt.Sprintf("SELECT oops.snap_drop_view(%s, %s, %s)", lit(rel), lit(grp), dollar(text))})
+			}
+		case pg.ObjectType_OBJECT_FUNCTION, pg.ObjectType_OBJECT_PROCEDURE, pg.ObjectType_OBJECT_ROUTINE:
+			p.Kind = "DROP FUNCTION"
+			if d.RemoveType == pg.ObjectType_OBJECT_PROCEDURE {
+				p.Kind = "DROP PROCEDURE"
+			}
+			for _, o := range d.Objects {
+				sig := routineSig(o.GetObjectWithArgs())
+				if sig == "" {
+					continue
+				}
+				p.Targets = append(p.Targets, sig)
+				p.Snaps = append(p.Snaps, SnapSQL{SQL: fmt.Sprintf("SELECT oops.snap_drop_routine(%s, %s, %s)", lit(sig), lit(grp), dollar(text))})
+			}
 		}
 	case n.GetAlterTableStmt() != nil:
 		a := n.GetAlterTableStmt()
@@ -303,6 +329,42 @@ func nameListText(n *pg.Node) string {
 		parts = append(parts, quoteIdent(it.GetString_().GetSval()))
 	}
 	return strings.Join(parts, ".")
+}
+
+// routineSig renders a function reference as name(argtypes), the form
+// to_regprocedure understands, or as a bare name when no arguments were given.
+func routineSig(o *pg.ObjectWithArgs) string {
+	if o == nil || len(o.Objname) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, n := range o.Objname {
+		parts = append(parts, quoteIdent(n.GetString_().GetSval()))
+	}
+	name := strings.Join(parts, ".")
+	if o.ArgsUnspecified {
+		return name
+	}
+	var args []string
+	for _, a := range o.Objargs {
+		tn := a.GetTypeName()
+		if tn == nil {
+			return ""
+		}
+		// Deparse each type on its own as a cast, then cut it out.
+		cast := &pg.Node{Node: &pg.Node_TypeCast{TypeCast: &pg.TypeCast{Arg: pg.MakeAConstIntNode(0, -1), TypeName: tn}}}
+		sel := &pg.SelectStmt{TargetList: []*pg.Node{pg.MakeResTargetNodeWithVal(cast, -1)}, Op: pg.SetOperation_SETOP_NONE, LimitOption: pg.LimitOption_LIMIT_OPTION_DEFAULT}
+		q, err := pgquery.Deparse(&pg.ParseResult{Version: 170000, Stmts: []*pg.RawStmt{{Stmt: &pg.Node{Node: &pg.Node_SelectStmt{SelectStmt: sel}}}}})
+		if err != nil {
+			return ""
+		}
+		q = strings.TrimPrefix(q, "SELECT 0::")
+		if strings.HasPrefix(q, "SELECT CAST(0 AS ") {
+			q = strings.TrimSuffix(strings.TrimPrefix(q, "SELECT CAST(0 AS "), ")")
+		}
+		args = append(args, q)
+	}
+	return name + "(" + strings.Join(args, ", ") + ")"
 }
 
 func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }

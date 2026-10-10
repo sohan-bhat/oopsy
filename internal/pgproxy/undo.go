@@ -184,6 +184,14 @@ func Describe(c Change) []string {
 			out = append(out, fmt.Sprintf("recreate schema %s", e.Schema))
 		case "drop_column":
 			out = append(out, fmt.Sprintf("add column %s back to %s.%s and refill %d values", e.Column, e.Schema, e.Table, e.Rows))
+		case "drop_view", "drop_function":
+			out = append(out, "recreate "+e.defName())
+		case "drop_matview":
+			l := "recreate " + e.defName()
+			if pop, _ := e.Meta["populated"].(bool); pop {
+				l += " and refresh it"
+			}
+			out = append(out, l)
 		}
 	}
 	return out
@@ -291,6 +299,38 @@ func Undo(ctx context.Context, conn *pgx.Conn, c Change) (*Result, error) {
 		res.Lines = append(res.Lines, line)
 	}
 
+	// Functions first, then views in the order they were saved, which puts a
+	// view after the ones it is built on. Retry for views saved out of order.
+	var defs []Entry
+	for _, e := range c.Entries {
+		if e.Kind == "drop_function" {
+			defs = append(defs, e)
+		}
+	}
+	for _, e := range c.Entries {
+		if e.Kind == "drop_view" || e.Kind == "drop_matview" {
+			defs = append(defs, e)
+		}
+	}
+	for pass := 0; len(defs) > 0; pass++ {
+		var retry []Entry
+		var lastErr error
+		for _, e := range defs {
+			line, warns, err := restoreDefinition(ctx, tx, e)
+			if err != nil {
+				lastErr = err
+				retry = append(retry, e)
+				continue
+			}
+			res.Lines = append(res.Lines, line)
+			res.Warnings = append(res.Warnings, warns...)
+		}
+		if len(retry) == len(defs) {
+			return nil, lastErr
+		}
+		defs = retry
+	}
+
 	if _, err := tx.Exec(ctx, "UPDATE oops.journal SET restored_at = now() WHERE grp = $1", c.Group); err != nil {
 		return nil, err
 	}
@@ -298,6 +338,55 @@ func Undo(ctx context.Context, conn *pgx.Conn, c Change) (*Result, error) {
 		return nil, err
 	}
 	return res, nil
+}
+
+// defName is how a saved definition is shown to people.
+func (e Entry) defName() string {
+	switch e.Kind {
+	case "drop_function":
+		if r, _ := e.Meta["routine"].(string); r != "" {
+			return r + " " + e.Schema + "." + e.Table
+		}
+		return "function " + e.Schema + "." + e.Table
+	case "drop_matview":
+		return "materialized view " + e.Schema + "." + e.Table
+	}
+	return "view " + e.Schema + "." + e.Table
+}
+
+// restoreDefinition recreates a dropped view, materialized view, function or
+// procedure, then reruns what went with it: owner, grants, comments, indexes,
+// triggers, column defaults and a refresh for a materialized view that held
+// data.
+func restoreDefinition(ctx context.Context, tx pgx.Tx, e Entry) (string, []string, error) {
+	var exists bool
+	var err error
+	if e.Kind == "drop_function" {
+		sig, _ := e.Meta["sig"].(string)
+		err = tx.QueryRow(ctx, "SELECT to_regprocedure($1) IS NOT NULL", sig).Scan(&exists)
+	} else {
+		err = tx.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", e.qualified()).Scan(&exists)
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	if exists {
+		return "", nil, fmt.Errorf("%s exists again; rename or drop it first so nothing gets overwritten", e.defName())
+	}
+	if err := savepointExec(ctx, tx, e.DDL); err != nil {
+		return "", nil, fmt.Errorf("recreating %s: %w", e.defName(), err)
+	}
+	var warns []string
+	for _, stmt := range e.DDLPost {
+		if err := savepointExec(ctx, tx, stmt); err != nil {
+			warns = append(warns, fmt.Sprintf("could not rerun %q: %v", shorten(stmt, 80), err))
+		}
+	}
+	line := e.defName() + " recreated"
+	if pop, _ := e.Meta["populated"].(bool); pop && e.Kind == "drop_matview" {
+		line += " and refreshed"
+	}
+	return line, warns, nil
 }
 
 func shorten(s string, n int) string {
