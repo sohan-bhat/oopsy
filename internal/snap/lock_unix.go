@@ -14,7 +14,12 @@ func acquire() (*lock, error) {
 	if err := os.MkdirAll(Dir(), 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(Dir(), "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	return lockAt(filepath.Join(Dir(), "lock"))
+}
+
+// lockAt takes an exclusive lock on the file at p, waiting for it.
+func lockAt(p string) (*lock, error) {
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
