@@ -108,7 +108,7 @@ func (e *env) lastSnapID() int {
 	return max
 }
 
-type snapMeta struct {
+type watchSnapMeta struct {
 	ID      int    `json:"id"`
 	Source  string `json:"source"`
 	Command string `json:"command"`
@@ -121,7 +121,7 @@ type snapMeta struct {
 
 // waitWatchSnap waits for a watch snapshot newer than after that holds
 // path, and returns it.
-func (e *env) waitWatchSnap(t *testing.T, after int, path string) snapMeta {
+func (e *env) waitWatchSnap(t *testing.T, after int, path string) watchSnapMeta {
 	t.Helper()
 	end := time.Now().Add(30 * time.Second)
 	for time.Now().Before(end) {
@@ -130,7 +130,7 @@ func (e *env) waitWatchSnap(t *testing.T, after int, path string) snapMeta {
 			if err != nil {
 				continue
 			}
-			var s snapMeta
+			var s watchSnapMeta
 			if json.Unmarshal(b, &s) != nil || s.Source != "watch" {
 				continue
 			}
@@ -144,7 +144,7 @@ func (e *env) waitWatchSnap(t *testing.T, after int, path string) snapMeta {
 	}
 	out, _, _ := e.oopsCmd("", "list", "--watch")
 	t.Fatalf("no watch snapshot of %s after %d\n%s\nstatus %+v", path, after, out, e.readWatchStatus())
-	return snapMeta{}
+	return watchSnapMeta{}
 }
 
 // settle gives the daemon time to finish the sync it is on, including
