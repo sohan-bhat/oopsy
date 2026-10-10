@@ -142,7 +142,9 @@ func (m *Mirror) folderIDs() []uint64 {
 		ids = append(ids, (uint64(info.FileIndexHigh)<<32|uint64(info.FileIndexLow))&frnMask)
 		return true
 	}
-	if !add(m.Root) {
+	// A file with hard links is reported under any one of its names, so
+	// the mirror's own folders count as the project's too.
+	if !add(m.Root) || !add(filepath.Join(m.Dir, "data")) {
 		return nil
 	}
 	for _, n := range nodes {
@@ -150,6 +152,7 @@ func (m *Mirror) folderIDs() []uint64 {
 			if !add(m.origPath(n.rel)) {
 				return nil
 			}
+			add(m.dataPath(n.rel))
 		}
 	}
 	return ids

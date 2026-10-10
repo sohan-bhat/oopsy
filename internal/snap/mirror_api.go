@@ -77,11 +77,13 @@ func MirrorBefore(root string, p Pending) (*SyncResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	Trace("open mirror")
 	l, err := m.lock()
 	if err != nil {
 		return nil, err
 	}
 	defer l.release()
+	Trace("lock mirror")
 	var res *SyncResult
 	if !m.Exists() {
 		w, err := walkProject(root, mirrorLimit())
@@ -97,7 +99,9 @@ func MirrorBefore(root string, p Pending) (*SyncResult, error) {
 		return nil, err
 	}
 	p.Time = time.Now()
-	return res, m.setPending(&p)
+	err = m.setPending(&p)
+	Trace("mark pending")
+	return res, err
 }
 
 // firstBuildInline is the largest project mirrored while a command waits.
