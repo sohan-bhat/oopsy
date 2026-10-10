@@ -2,6 +2,7 @@ package snap
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -130,7 +131,7 @@ func (m *Mirror) finishWatch(s *Snapshot, prepared map[string]baseRec, maxFile i
 		case within(e.Orig, filepath.Join(m.Root, ".git")):
 			drop(e)
 			continue
-		case e.After != nil && e.Type == "file" && e.Size > maxFile:
+		case e.After != nil && e.Type == "file" && logicalSize(s, e) > maxFile:
 			drop(e)
 			skipped = append(skipped, Skip{Path: e.Orig, Reason: fmt.Sprintf("bigger than the watch limit of %d MB (oops config watch_max_file_mb)", maxFile>>20)})
 			continue
@@ -213,4 +214,12 @@ func PruneWatch(max int) int {
 		}
 	}
 	return removed
+}
+
+// logicalSize is a saved file's length, which the watch limit is about.
+func logicalSize(s *Snapshot, e Entry) int64 {
+	if fi, err := os.Lstat(s.EntryPath(e)); err == nil {
+		return fi.Size()
+	}
+	return e.Size
 }
