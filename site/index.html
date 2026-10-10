@@ -163,6 +163,7 @@
       <h2 id="pg-title" class="h2">Postgres, too.</h2>
       <p>Run <code>oops db proxy --upstream postgres://...</code> and point your app or agent at the proxy instead. Before any <code>DROP TABLE</code>, <code>TRUNCATE</code>, <code>DELETE</code> or <code>UPDATE</code> reaches the database, Oopsy copies exactly the rows it is about to touch, inside the same transaction, so a rollback discards the snapshot too.</p>
       <p>Or skip the setup: <code>oops db wrap -- npm run dev</code> runs your command with <code>DATABASE_URL</code> pointed at a temporary proxy.</p>
+      <p>It also saves view and function definitions before they are dropped, the rows an upsert is about to overwrite, and a compressed <code>pg_dump</code> before <code>DROP DATABASE</code>. For changes made straight in <code>psql</code> or by a migration tool, <code>oops db protect</code> adds triggers that keep them undoable too.</p>
       <p>Forgot the <code>WHERE</code>? <code>oops db undo</code>.</p>
     </div>
     <div class="db" id="db" aria-label="Interactive database demo">
@@ -204,7 +205,7 @@
         <li>File edits made in an editor, or by an agent's own edit tool instead of the shell.</li>
         <li>Other machines. Commands run over <code>ssh</code> change another computer, so undo there needs Oopsy installed there too.</li>
         <li>Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, files or disks inside cloud resources.</li>
-        <li>Database changes that skip the proxy, plus <code>DROP DATABASE</code>, <code>DROP VIEW</code> and upserts.</li>
+        <li>Database changes that skip the proxy, unless you turn on <code>oops db protect</code>. With it on, inserts and <code>ALTER</code> statements are still not reversed.</li>
         <li>An overwrite on a disk without copy on write, like NTFS and ext4, when the copy would leave less than the free space floor. Oopsy skips it and tells you right then.</li>
         <li>Commands typed straight into cmd.exe, which has no hook. PowerShell, Git Bash and agent commands are covered.</li>
         <li>A dead disk. Snapshots live next to your files, so keep a real backup too.</li>
