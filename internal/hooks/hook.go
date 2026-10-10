@@ -119,7 +119,11 @@ func Run(source string, args []string, stdin io.Reader, stdout, stderr io.Writer
 			fmt.Fprintln(stderr, ui.ErrDim(msg))
 		}
 		for _, sk := range s.Skipped {
-			fmt.Fprintf(stderr, "%s not saved: %s (%s)\n", ui.ErrWarn("oops:"), ui.HomeRel(sk.Path), sk.Reason)
+			if sk.Path == "" {
+				fmt.Fprintf(stderr, "%s not saved: %s\n", ui.ErrWarn("oops:"), sk.Reason)
+			} else {
+				fmt.Fprintf(stderr, "%s not saved: %s (%s)\n", ui.ErrWarn("oops:"), ui.HomeRel(sk.Path), sk.Reason)
+			}
 		}
 	case "claude":
 		reply, _ := json.Marshal(map[string]any{"systemMessage": msg})
