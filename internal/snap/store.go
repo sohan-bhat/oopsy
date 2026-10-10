@@ -256,7 +256,22 @@ func (s *Snapshot) save() error {
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, filepath.Join(s.Dir(), "meta.json"))
+	return replaceFile(tmp, filepath.Join(s.Dir(), "meta.json"))
+}
+
+// replaceFile renames tmp over dst. On Windows a rename fails while another
+// process has dst open, for example oops list reading it, so it retries for
+// a moment instead of losing the update.
+func replaceFile(tmp, dst string) error {
+	var err error
+	for i := 0; i < 40; i++ {
+		if err = os.Rename(tmp, dst); err == nil {
+			return nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	os.Remove(tmp)
+	return err
 }
 
 // Load reads snapshot id.
