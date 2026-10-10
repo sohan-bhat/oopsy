@@ -649,7 +649,7 @@ func explainCmd() *cobra.Command {
 func configCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "config [key value]",
-		Short: "Show or change settings (keep_days, max_gb, free_floor_gb, quiet)",
+		Short: "Show or change settings (keep_days, max_gb, free_floor_gb, quiet, store)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			warnConfig()
@@ -664,6 +664,11 @@ func configCmd() *cobra.Command {
 				}
 				fmt.Printf("quiet        %v\n", cfg.Quiet)
 				fmt.Printf("watch_max_file_mb %d\n", snap.WatchMaxFile()>>20)
+				if cfg.Store != "" {
+					fmt.Printf("store        %s\n", cfg.Store)
+				} else {
+					fmt.Printf("store        %s (set store to a folder on another drive to survive a dead disk)\n", ui.HomeRel(snap.Dir()))
+				}
 				fmt.Println(ui.Dim("Stored in " + ui.HomeRel(snap.ConfigPath())))
 				return nil
 			}
@@ -699,8 +704,22 @@ func configCmd() *cobra.Command {
 					return cli.UsageErr("watch_max_file_mb must be a number of megabytes, 1 or more, for example: oops config watch_max_file_mb 100")
 				}
 				cfg.WatchMaxFileMB = int(f)
+			case "store":
+				if v == "none" || v == "" {
+					cfg.Store = ""
+					break
+				}
+				dir, err := filepath.Abs(v)
+				if err != nil {
+					return err
+				}
+				if err := os.MkdirAll(dir, 0o700); err != nil {
+					return fmt.Errorf("cannot use %s as the store: %v", dir, err)
+				}
+				cfg.Store = dir
+				fmt.Println(ui.Dim("Snapshots, mirrors and objects now go to " + ui.HomeRel(dir) + ". Clones and hard links cannot cross drives, so each project costs one full compressed copy there, plus the changes. That is what keeps them safe if this disk dies."))
 			default:
-				return cli.UsageErr("%q is not a setting. The settings are keep_days, max_gb, free_floor_gb, quiet and watch_max_file_mb; oops config shows them all", args[0])
+				return cli.UsageErr("%q is not a setting. The settings are keep_days, max_gb, free_floor_gb, quiet, store and watch_max_file_mb; oops config shows them all", args[0])
 			}
 			if err := snap.SaveConfig(cfg); err != nil {
 				return err
