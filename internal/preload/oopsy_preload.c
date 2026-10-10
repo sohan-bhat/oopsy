@@ -111,8 +111,16 @@ static int absolute(int dirfd, const char *p, char *out) {
     return 0;
 }
 
+static void save_copy_inner(int dirfd, const char *p);
+
 static void save_copy(int dirfd, const char *p) {
     if (!p || busy) return;
+    int saved_errno = errno;
+    save_copy_inner(dirfd, p);
+    errno = saved_errno;
+}
+
+static void save_copy_inner(int dirfd, const char *p) {
     pthread_once(&once, load);
     if (nroots <= 0) return;
     char abs[PATH_MAX];
@@ -123,7 +131,6 @@ static void save_copy(int dirfd, const char *p) {
     if (lstat(abs, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size > max_bytes) return;
     if (st.st_nlink < 2) return; /* not hard linked into a mirror */
     busy = 1;
-    int saved_errno = errno;
     char dir[PATH_MAX], dst[PATH_MAX], tmp[PATH_MAX];
     if (!FITS(dir, "%s/%016llx", store, (unsigned long long)fnv(root))) goto out;
     mkdir(dir, 0700);
@@ -148,7 +155,6 @@ static void save_copy(int dirfd, const char *p) {
     if (close(o) != 0) ok = 0;
     if (!ok || rename(tmp, dst) != 0) unlink(tmp);
 out:
-    errno = saved_errno;
     busy = 0;
 }
 
