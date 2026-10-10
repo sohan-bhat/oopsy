@@ -65,6 +65,13 @@ func TestGenericCost(t *testing.T) {
 		post = append(post, hook("hook", "zsh-post"))
 		ro = append(ro, hook("hook", "zsh", "--", "git status"))
 	}
+	{
+		c := exec.Command(bin, "hook", "zsh", "--", "./deploy.sh --fast")
+		c.Dir = root
+		c.Env = append(e.environ(), "OOPSY_SESSION=bench", "OOPS_TRACE=1")
+		out, _ := c.CombinedOutput()
+		t.Logf("one traced hook:\n%s", out)
+	}
 	pm, p95 := stats(pre)
 	am, a95 := stats(post)
 	rm, _ := stats(ro)

@@ -4,6 +4,7 @@ package snap
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -162,6 +163,7 @@ func (m *Mirror) usnClean() bool {
 	}
 	b, err := os.ReadFile(m.usnPath())
 	if err != nil {
+		Trace("change journal: no saved position")
 		return false
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
@@ -182,11 +184,13 @@ func (m *Mirror) usnClean() bool {
 	}
 	h, err := openVolume(m.Root)
 	if err != nil {
+		Trace("change journal: cannot open the volume")
 		return false
 	}
 	defer windows.CloseHandle(h)
 	d, ok := queryJournal(h)
 	if !ok || d.UsnJournalID != journal || start < d.FirstUsn || start < d.LowestValidUsn {
+		Trace("change journal: position no longer valid")
 		return false
 	}
 	buf := make([]byte, 64<<10)
@@ -200,6 +204,7 @@ func (m *Mirror) usnClean() bool {
 				&buf[0], uint32(len(buf)), &ret, nil)
 		}
 		if err != nil || ret < 8 {
+			Trace("change journal: read failed: " + fmt.Sprint(err))
 			return false
 		}
 		next := int64(binary.LittleEndian.Uint64(buf))
@@ -222,6 +227,17 @@ func (m *Mirror) usnClean() bool {
 			// not change any content.
 			harmless := reason&^(usnReasonHardLinkChange|usnReasonClose) == 0
 			if !harmless && (ids[frn] || ids[parent]) {
+				nameLen := int(binary.LittleEndian.Uint16(buf[off+56:]))
+				nameOff := int(binary.LittleEndian.Uint16(buf[off+58:]))
+				name := ""
+				if off+nameOff+nameLen <= int(ret) {
+					u := make([]uint16, nameLen/2)
+					for i := range u {
+						u[i] = binary.LittleEndian.Uint16(buf[off+nameOff+2*i:])
+					}
+					name = windows.UTF16ToString(u)
+				}
+				Trace(fmt.Sprintf("change journal: %s changed (reason %#x)", name, reason))
 				return false
 			}
 			off += length
