@@ -40,7 +40,12 @@ type tc struct {
 
 func check(t *testing.T, dir string, env []string, c tc) {
 	t.Helper()
-	res := Classify(c.cmd, dir, env)
+	checkWith(t, Classify, dir, env, c)
+}
+
+func checkWith(t *testing.T, classify func(cmd, cwd string, env []string) Result, dir string, env []string, c tc) {
+	t.Helper()
+	res := classify(c.cmd, dir, env)
 	if res.Destructive() != c.want {
 		t.Errorf("%q: destructive=%v, want %v (actions %+v)", c.cmd, res.Destructive(), c.want, res.Actions)
 		return
@@ -54,7 +59,7 @@ func check(t *testing.T, dir string, env []string, c tc) {
 			if err != nil || strings.HasPrefix(rel, "..") {
 				rel = p
 			}
-			got[rel] = true
+			got[filepath.ToSlash(rel)] = true
 		}
 		if a.Git != nil {
 			gitKinds[a.Git.Kind] = true
@@ -124,7 +129,7 @@ func TestRmForms(t *testing.T) {
 		{cmd: "rm -rf $UNSET_THING/build", want: true, broad: true},
 		{cmd: "rm -rf $(cat list.txt)", want: true, broad: true},
 		{cmd: "rm -rf `cat list.txt`", want: true, broad: true},
-		{cmd: "rm " + filepath.Join(dir, "a.txt"), want: true, paths: []string{"a.txt"}},
+		{cmd: "rm " + filepath.ToSlash(filepath.Join(dir, "a.txt")), want: true, paths: []string{"a.txt"}},
 		{cmd: "rm ../" + filepath.Base(dir) + "/a.txt", want: true, paths: []string{"a.txt"}},
 		{cmd: "rm ./dir1/../a.txt", want: true, paths: []string{"a.txt"}},
 		{cmd: "rm link", want: true, paths: []string{"link"}},
