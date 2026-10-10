@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -147,9 +148,7 @@ func TestPGDropDatabaseWithoutRoomStillRuns(t *testing.T) {
 	if !strings.Contains(strings.Join(*notes, "\n"), "took no dump of database "+name) {
 		t.Fatalf("expected a warning, got %v", *notes)
 	}
-	if !strings.Contains(p.log.String(), "took no dump") {
-		t.Fatalf("proxy log: %s", p.log.String())
-	}
+	waitLog(t, p, "took no dump")
 }
 
 func TestPGDropDatabaseExtendedProtocolFailedDropKeepsNoDump(t *testing.T) {
@@ -169,7 +168,16 @@ func TestPGDropDatabaseExtendedProtocolFailedDropKeepsNoDump(t *testing.T) {
 	if dumps, _ := filepath.Glob(filepath.Join(e.oops, "db", "dumps", "*")); len(dumps) != 0 {
 		t.Fatalf("dump of a database that still exists was kept: %v", dumps)
 	}
-	if !strings.Contains(p.log.String(), "did not run, so its dump was deleted") {
-		t.Fatalf("proxy log: %s", p.log.String())
+	waitLog(t, p, "did not run, so its dump was deleted")
+}
+
+// waitLog waits for a line in the proxy's log, which arrives through a pipe.
+func waitLog(t *testing.T, p *proxyProc, want string) {
+	t.Helper()
+	for i := 0; i < 100 && !strings.Contains(p.log.String(), want); i++ {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !strings.Contains(p.log.String(), want) {
+		t.Fatalf("proxy log has no %q: %s", want, p.log.String())
 	}
 }
