@@ -98,6 +98,9 @@ func Restore(s *Snapshot) ([]Outcome, error) {
 				} else {
 					out = append(out, Outcome{Path: e.Orig, Status: "restored"})
 				}
+				if perr == nil && e.ParentMtime != 0 {
+					setMtime(parent, e.ParentMtime)
+				}
 				continue
 			}
 		}
