@@ -173,7 +173,7 @@ func FinishPending(session string) []*SyncResult {
 	var out []*SyncResult
 	for _, e := range ents {
 		b, err := os.ReadFile(filepath.Join(pendingDir(), e.Name()))
-		if err != nil {
+		if err != nil || len(b) == 0 {
 			continue
 		}
 		var rec struct{ Root, Session string }

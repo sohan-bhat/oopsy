@@ -161,7 +161,7 @@ func (m *Mirror) Exists() bool {
 
 func (m *Mirror) pending() *Pending {
 	b, err := os.ReadFile(filepath.Join(m.Dir, "pending.json"))
-	if err != nil {
+	if err != nil || len(b) == 0 {
 		return nil
 	}
 	var p Pending
@@ -171,23 +171,38 @@ func (m *Mirror) pending() *Pending {
 	return &p
 }
 
+// setPending records or clears the pending command. The files are kept and
+// emptied rather than deleted, since creating files is what costs most on
+// Windows, where antivirus scanning looks at every new file.
 func (m *Mirror) setPending(p *Pending) error {
 	marker := filepath.Join(pendingDir(), mirrorKey(m.Root))
 	if p == nil {
-		_ = os.Remove(marker)
-		err := os.Remove(filepath.Join(m.Dir, "pending.json"))
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
+		_ = rewrite(marker, nil)
+		return rewrite(filepath.Join(m.Dir, "pending.json"), nil)
 	}
 	b, _ := json.Marshal(p)
-	if err := os.WriteFile(filepath.Join(m.Dir, "pending.json"), b, 0o600); err != nil {
+	if err := rewrite(filepath.Join(m.Dir, "pending.json"), b); err != nil {
 		return err
 	}
-	_ = os.MkdirAll(pendingDir(), 0o700)
 	rec, _ := json.Marshal(map[string]string{"root": m.Root, "session": p.Session})
-	return os.WriteFile(marker, rec, 0o600)
+	if err := rewrite(marker, rec); err != nil {
+		_ = os.MkdirAll(pendingDir(), 0o700)
+		return rewrite(marker, rec)
+	}
+	return nil
+}
+
+// rewrite replaces a small file's content in place.
+func rewrite(p string, b []byte) error {
+	f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(b)
+	if err := f.Close(); werr == nil {
+		werr = err
+	}
+	return werr
 }
 
 func pendingDir() string { return filepath.Join(Dir(), "pending") }
