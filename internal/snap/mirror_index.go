@@ -41,7 +41,7 @@ func writeIndex(p string, nodes []node) error {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	return replaceFile(tmp, p)
 }
 
 func readIndex(p string) ([]node, error) {
