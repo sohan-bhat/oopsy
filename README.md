@@ -96,7 +96,7 @@ The shell hook runs right before each command. A quick regex skips anything harm
 
 * a copy on write clone: APFS on macOS, reflinks on btrfs and xfs, block cloning on ReFS and Dev Drive. Instant, and no extra disk until the original changes.
 * hard links when the command only deletes (`rm`, `Remove-Item`, `del`, `git clean`), on NTFS and ext4. Also instant and free, since the data simply stays alive through the snapshot.
-* a copy for overwrites where neither works, NTFS compressed on Windows, capped at 1 GB per snapshot.
+* a real copy for overwrites where neither works: NTFS compressed on Windows, zstd compressed elsewhere (files that are already compressed, like images and archives, are stored as they are). A copy can be any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, at least 2 GB and at most 20 GB, which is about where ext4 keeps space back for root and where macOS and Windows start warning. If a copy would break the floor, Oopsy skips it and tells you right then. Change the floor with `oops config free_floor_gb 4`.
 
 When the folder is on another drive than your home, hard links and clones go to a private store at that drive's root (`D:\.oops` on Windows, readable only by you). Snapshots are pruned after 7 days or past 5 GB (`oops config` to change).
 
@@ -112,7 +112,7 @@ The Postgres proxy speaks the wire protocol and parses every statement. Before a
 * Anything remote: `ssh`, `rsync` to another host, cloud resources, `kubectl delete`, `docker volume rm`, `terraform destroy`.
 * File edits made by an editor or by an agent's own edit tool rather than the shell.
 * Database changes that do not go through the proxy, plus `DROP DATABASE`, `DROP INDEX`, `DROP VIEW`, deletes inside functions or triggers, and upserts. Grants and row level security policies are not restored. An `UPDATE` on a table without a primary key is undone by restoring the whole table.
-* Overwrites of very large files on filesystems without copy on write (NTFS, ext4): the copy is capped at 1 GB, and Oopsy tells you when it skipped something.
+* Overwrites on a disk without copy on write (NTFS, ext4) when the copy would leave less than the free space floor: Oopsy skips that copy and tells you.
 * Undoing `git push --force` needs the old commit in your local repo, which it is if you fetched before pushing.
 
 On Windows:

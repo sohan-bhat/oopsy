@@ -56,7 +56,7 @@ oops: oops config keep_days needs a value too. Try: oops config keep_days 14, or
 [exit 2]
 
 $ oops config nope 1
-oops: "nope" is not a setting. The settings are keep_days, max_gb, copy_cap_gb and quiet; oops config shows them all
+oops: "nope" is not a setting. The settings are keep_days, max_gb, free_floor_gb and quiet; oops config shows them all
 [exit 2]
 
 $ oops 
