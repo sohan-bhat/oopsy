@@ -4,6 +4,8 @@
 
 Website: https://sohan-bhat.github.io/oopsy/
 
+Runs on macOS, Linux and Windows.
+
 ```console
 $ rm -rf src
 oops: saved snapshot 12 (214 items, 3.1 MB). Run oops to undo.
@@ -25,6 +27,8 @@ Ctrl+Z does not cover the terminal, `rm` skips the Trash, git only protects what
 
 ## Install
 
+macOS and Linux:
+
 ```sh
 brew install sohan-bhat/tap/oopsy
 ```
@@ -32,7 +36,20 @@ brew install sohan-bhat/tap/oopsy
 or
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sohan-bhat/oopsy/main/install.sh | sh
+curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | sh
+```
+
+Windows:
+
+```powershell
+scoop bucket add oopsy https://github.com/sohan-bhat/scoop-bucket
+scoop install oopsy/oopsy
+```
+
+or
+
+```powershell
+irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
 ```
 
 Then turn on the hooks once:
@@ -41,7 +58,7 @@ Then turn on the hooks once:
 oops init
 ```
 
-This adds a small hook to zsh, bash and fish, and a pre tool hook to Claude Code, Codex CLI, Cursor and Gemini CLI if they are installed. Every file it touches is backed up first, and `oops uninstall` removes it all.
+This adds a small hook to zsh, bash, fish and PowerShell (Git Bash too on Windows), and a pre tool hook to Claude Code, Codex CLI, Cursor and Gemini CLI if they are installed. Every file it touches is backed up first, and `oops uninstall` removes it all.
 
 ## Use
 
@@ -62,7 +79,15 @@ oops db undo
 
 ## How it works
 
-The shell hook runs right before each command. A quick regex skips anything harmless without starting a process. Otherwise Oopsy parses the command with a real shell parser, expands variables and globs the way your shell will, and works out exactly which paths, git refs or stashes are about to be destroyed. It saves them under `~/.oops` with an APFS clone on macOS or a reflink on btrfs and xfs, so a snapshot is instant and takes almost no disk until the original is gone. Snapshots are pruned after 7 days or past 5 GB (`oops config` to change).
+The shell hook runs right before each command. A quick regex skips anything harmless without starting a process. Otherwise Oopsy parses the command with a real shell parser, expands variables and globs the way your shell will, and works out exactly which paths, git refs or stashes are about to be destroyed. It saves them under `~/.oops` the cheapest safe way the disk allows:
+
+* a copy on write clone: APFS on macOS, reflinks on btrfs and xfs, block cloning on ReFS and Dev Drive. Instant, and no extra disk until the original changes.
+* hard links when the command only deletes (`rm`, `Remove-Item`, `del`, `git clean`), on NTFS and ext4. Also instant and free, since the data simply stays alive through the snapshot.
+* a copy for overwrites where neither works, NTFS compressed on Windows, capped at 1 GB per snapshot.
+
+When the folder is on another drive than your home, hard links and clones go to a private store at that drive's root (`D:\.oops` on Windows, readable only by you). Snapshots are pruned after 7 days or past 5 GB (`oops config` to change).
+
+PowerShell has no preexec hook, so Oopsy wraps the function PSReadLine uses to read each line and checks it after you press Enter, before it runs. The PowerShell parser knows `Remove-Item` and its aliases, `Move-Item`, `Copy-Item`, `Set-Content`, `Out-File`, redirects and pipelines like `Get-ChildItem *.log | Remove-Item`. Agent commands on Windows are read as bash, PowerShell and cmd.exe at once.
 
 Restores never overwrite newer work: if something exists at the path again, both copies are kept.
 
@@ -74,10 +99,17 @@ The Postgres proxy speaks the wire protocol and parses every statement. Before a
 * Anything remote: `ssh`, `rsync` to another host, cloud resources, `kubectl delete`, `docker volume rm`, `terraform destroy`.
 * File edits made by an editor or by an agent's own edit tool rather than the shell.
 * Database changes that do not go through the proxy, plus `DROP DATABASE`, `DROP INDEX`, `DROP VIEW`, deletes inside functions or triggers, and upserts. Grants and row level security policies are not restored. An `UPDATE` on a table without a primary key is undone by restoring the whole table.
-* Very large trees on filesystems without copy on write (ext4, external drives): Oopsy falls back to a plain copy capped at 1 GB and tells you when it skipped something.
+* Overwrites of very large files on filesystems without copy on write (NTFS, ext4): the copy is capped at 1 GB, and Oopsy tells you when it skipped something.
 * Undoing `git push --force` needs the old commit in your local repo, which it is if you fetched before pushing.
 
-The Linux reflink path is new and has had less testing than macOS.
+On Windows:
+
+* Commands typed into cmd.exe are not hooked (cmd has no hook to run code before a command). Commands agents run through cmd are covered.
+* Files another program holds open without sharing are skipped with a warning.
+* Copies and clones do not keep alternate data streams (such as the downloaded from the internet mark); hard link snapshots do. ACLs come from the folder a file is restored into.
+* Windows PowerShell's default execution policy on desktop Windows blocks profiles; `oops init` and `oops doctor` tell you the one command to allow it.
+
+The Linux reflink and Windows paths are newer and have had less real world use than macOS.
 
 ## License
 
