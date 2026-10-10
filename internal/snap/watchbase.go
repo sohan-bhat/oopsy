@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -142,6 +143,7 @@ func UpdateWatchBase(root string, maxFile int64, verify bool) (BaseResult, error
 	old, _ := readBase(m.basePath())
 	recs := make(map[string]baseRec, len(idx))
 	changed := len(old) == 0
+	var todo []node
 	for _, n := range idx {
 		if n.kind != 'f' || n.size > maxFile || n.rel == ".git" || strings.HasPrefix(n.rel, ".git/") {
 			continue // git writes new files, never in place, and watch skips its folder
@@ -154,28 +156,32 @@ func UpdateWatchBase(root string, maxFile int64, verify bool) (BaseResult, error
 			}
 		}
 		changed = true
-		orig := m.origPath(n.rel)
-		fi, err := os.Lstat(orig)
-		if err != nil || !fi.Mode().IsRegular() || fi.Size() != n.size || fi.ModTime().UnixNano() != n.mtime {
-			continue // changed since the last sync; the next one catches up
-		}
-		o, err := PutObject(orig)
-		if err != nil {
-			continue
-		}
-		if st := StampOf(orig); st == nil || *st != n.stamp() {
-			continue // written while it was being read
-		}
-		b := baseRec{size: n.size, mtime: n.mtime, mode: uint32(fi.Mode().Perm())}
-		if raw, err := hex.DecodeString(o.Hash); err == nil && len(raw) == 32 {
-			copy(b.hash[:], raw)
-		} else {
-			continue
-		}
-		recs[n.rel] = b
-		res.Stored++
-		res.Raw += b.size
+		todo = append(todo, n)
 	}
+	// Storing is mostly reading and compressing, so a few run at once.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	work := make(chan node)
+	for w := 0; w < baseWorkers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := range work {
+				if b, ok := m.storeVersion(n); ok {
+					mu.Lock()
+					recs[n.rel] = b
+					res.Stored++
+					res.Raw += b.size
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, n := range todo {
+		work <- n
+	}
+	close(work)
+	wg.Wait()
 	if len(recs) != len(old) {
 		changed = true
 	}
@@ -186,6 +192,33 @@ func UpdateWatchBase(root string, maxFile int64, verify bool) (BaseResult, error
 		}
 	}
 	return res, nil
+}
+
+// baseWorkers is how many files UpdateWatchBase stores at once.
+const baseWorkers = 4
+
+// storeVersion puts the current version of one file in the object store,
+// when it still is the version the index knows.
+func (m *Mirror) storeVersion(n node) (baseRec, bool) {
+	orig := m.origPath(n.rel)
+	fi, err := os.Lstat(orig)
+	if err != nil || !fi.Mode().IsRegular() || fi.Size() != n.size || fi.ModTime().UnixNano() != n.mtime {
+		return baseRec{}, false // changed since the last sync; the next one catches up
+	}
+	o, err := PutObject(orig)
+	if err != nil {
+		return baseRec{}, false
+	}
+	if st := StampOf(orig); st == nil || *st != n.stamp() {
+		return baseRec{}, false // written while it was being read
+	}
+	b := baseRec{size: n.size, mtime: n.mtime, mode: uint32(fi.Mode().Perm())}
+	raw, err := hex.DecodeString(o.Hash)
+	if err != nil || len(raw) != 32 {
+		return baseRec{}, false
+	}
+	copy(b.hash[:], raw)
+	return b, true
 }
 
 // BaseCost adds up the disk the base objects of root take.

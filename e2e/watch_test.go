@@ -72,7 +72,7 @@ func (e *env) startWatch(t *testing.T, roots ...string) {
 			t.Logf("watch daemon output:\n%s", out.String())
 		}
 	})
-	end := time.Now().Add(2 * time.Minute)
+	end := time.Now().Add(6 * time.Minute) // the first sync stores every file on hard link disks
 	for time.Now().Before(end) {
 		if st := e.readWatchStatus(); st != nil && st.Ready && len(st.Projects) >= len(roots) {
 			have := map[string]bool{}
