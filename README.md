@@ -52,6 +52,19 @@ or
 irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
 ```
 
+To pin a version, set `OOPS_VERSION` (without the `v`):
+
+```sh
+curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPS_VERSION=0.2.0 sh
+```
+
+```powershell
+$env:OOPS_VERSION = '0.2.0'; irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+scoop install oopsy/oopsy@0.2.0
+```
+
+Homebrew always installs the latest release.
+
 Then turn on the hooks once:
 
 ```sh
@@ -110,6 +123,10 @@ On Windows:
 * Windows PowerShell's default execution policy on desktop Windows blocks profiles; `oops init` and `oops doctor` tell you the one command to allow it.
 
 The Linux reflink and Windows paths are newer and have had less real world use than macOS.
+
+## Exit codes
+
+`oops` and `oops db` exit with 0 when they are done (or there was nothing to do), 1 when something went wrong, 2 when the command line was wrong, 3 when the snapshot or database change you asked for does not exist, and 4 when a restore brought back some paths but not all. Every error says what happened and what to do next.
 
 ## License
 
