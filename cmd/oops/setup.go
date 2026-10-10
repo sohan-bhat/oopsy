@@ -16,6 +16,7 @@ import (
 	"github.com/sohan-bhat/oopsy/internal/hooks"
 	"github.com/sohan-bhat/oopsy/internal/snap"
 	"github.com/sohan-bhat/oopsy/internal/ui"
+	"github.com/sohan-bhat/oopsy/internal/watch"
 )
 
 func anyHookInstalled() bool {
@@ -145,6 +146,13 @@ func uninstallCmd() *cobra.Command {
 			}
 			if removed == 0 {
 				fmt.Println("No Oopsy hooks are installed.")
+			}
+			if watch.Installed() {
+				if _, err := watch.Off(); err != nil {
+					fmt.Printf("  %s %-12s %v\n", ui.Bad("failed"), "watch", err)
+				} else {
+					fmt.Printf("  %s %-12s %s\n", ui.Good("removed"), "watch", "background service")
+				}
 			}
 			if purge {
 				if err := os.RemoveAll(filepath.Join(snap.Dir(), "snapshots")); err != nil {

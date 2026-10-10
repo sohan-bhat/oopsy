@@ -25,7 +25,7 @@ func fail(format string, a ...any) { ui.Errorf(format, a...) }
 
 var sourceLabels = map[string]string{
 	"zsh": "zsh", "bash": "bash", "fish": "fish", "shell": "shell", "powershell": "PowerShell", "cmd": "cmd",
-	"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "gemini": "Gemini CLI", "manual": "manual",
+	"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "gemini": "Gemini CLI", "manual": "manual", "watch": "watch",
 }
 
 func sourceLabel(s string) string {
@@ -64,7 +64,7 @@ func finishPending() { snap.FinishPending("") }
 
 func undoLatest(yes bool) error {
 	finishPending()
-	s, err := snap.Latest()
+	s, err := snap.LatestUndo()
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func undoCmd() *cobra.Command {
 
 func listCmd() *cobra.Command {
 	var n int
-	var asJSON bool
+	var asJSON, withWatch bool
 	c := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls", "log"},
@@ -214,9 +214,33 @@ func listCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			hidden := 0
+			if !withWatch {
+				// Editor saves would flood the list; show the ones that
+				// count as commands (deletions) and hide plain edits.
+				kept := list[:0]
+				for _, s := range list {
+					if s.WatchEditsOnly() {
+						hidden++
+						continue
+					}
+					kept = append(kept, s)
+				}
+				list = kept
+			}
 			if asJSON {
 				b, _ := json.MarshalIndent(list, "", "  ")
 				fmt.Println(string(b))
+				return nil
+			}
+			watchHint := func() {
+				if hidden > 0 {
+					fmt.Println(ui.Dim(fmt.Sprintf("%s of saved edits hidden; oops list --watch shows them.", ui.Plural(hidden, "watch snapshot"))))
+				}
+			}
+			if len(list) == 0 && hidden > 0 {
+				fmt.Println("No snapshots of commands yet.")
+				watchHint()
 				return nil
 			}
 			if len(list) == 0 {
@@ -247,10 +271,13 @@ func listCmd() *cobra.Command {
 				}
 				fmt.Println(line)
 			}
+			watchHint()
 			return nil
 		},
 	}
 	c.Flags().IntVarP(&n, "number", "n", 20, "how many to show (0 for all)")
+	c.Flags().BoolVar(&withWatch, "watch", false, "include watch snapshots of saved edits")
+	c.Flags().BoolVar(&withWatch, "all", false, "same as --watch")
 	c.Flags().BoolVar(&asJSON, "json", false, "print JSON")
 	return c
 }
@@ -643,6 +670,7 @@ func configCmd() *cobra.Command {
 					fmt.Printf("free_floor_gb auto (5%% of the disk, between 2 and 20 GB)\n")
 				}
 				fmt.Printf("quiet        %v\n", cfg.Quiet)
+				fmt.Printf("watch_max_file_mb %d\n", snap.WatchMaxFile()>>20)
 				if cfg.Store != "" {
 					fmt.Printf("store        %s\n", cfg.Store)
 				} else {
@@ -678,6 +706,11 @@ func configCmd() *cobra.Command {
 				cfg.FreeFloorBytes = int64(f * (1 << 30))
 			case "quiet":
 				cfg.Quiet = v == "true" || v == "1" || v == "yes"
+			case "watch_max_file_mb":
+				if ferr != nil || f < 1 {
+					return fmt.Errorf("watch_max_file_mb must be a number of megabytes, 1 or more")
+				}
+				cfg.WatchMaxFileMB = int(f)
 			case "store":
 				if v == "none" || v == "" {
 					cfg.Store = ""
