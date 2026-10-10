@@ -25,6 +25,8 @@ type Config struct {
 	Quiet          bool  `json:"quiet"`
 	// RebuildableKeepDays is how long node_modules and friends are kept.
 	RebuildableKeepDays int `json:"rebuildable_keep_days,omitempty"`
+	// NoPreload turns off the Linux preload library.
+	NoPreload bool `json:"no_preload,omitempty"`
 	// MirrorMaxFiles caps the projects the generic layer mirrors.
 	MirrorMaxFiles int `json:"mirror_max_files,omitempty"`
 }
