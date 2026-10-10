@@ -98,10 +98,7 @@ func Confirm(question string) bool {
 			return false
 		}
 		defer tty.Close()
-		in = tty
-		if runtime.GOOS != "windows" {
-			out = tty
-		}
+		in, out = tty, tty
 	}
 	fmt.Fprintf(out, "%s %s ", question, Dim("[y/N]"))
 	line, _ := bufio.NewReader(in).ReadString('\n')
@@ -140,8 +137,9 @@ func stdinIsTerminal() bool {
 // openTTY opens the controlling terminal even when stdin is redirected.
 func openTTY() (*os.File, error) {
 	if runtime.GOOS == "windows" {
-		// CONIN$ reads the console; prompts go to stderr, which is enough.
-		return os.OpenFile("CONIN$", os.O_RDWR, 0)
+		// Agents start processes with a hidden console, so CONIN$ would
+		// open and then wait forever. Only a real stdin terminal counts.
+		return nil, os.ErrNotExist
 	}
 	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
 }
