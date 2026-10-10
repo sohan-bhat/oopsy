@@ -107,7 +107,7 @@ func TestOverwritesNeverUseHardLinks(t *testing.T) {
 	} {
 		s := create(t, filepath.Dir(work), actions...)
 		e := s.Entries[0]
-		if e.Method != "copy" {
+		if e.Method != "copy" && e.Method != "compressed copy" {
 			t.Fatalf("%v: method %q, want copy", actions, e.Method)
 		}
 		orig, _ := os.Stat(f)

@@ -81,7 +81,7 @@ type Entry struct {
 	Type        string `json:"type"` // file, dir, symlink
 	Size        int64  `json:"size"`
 	Files       int    `json:"files"`
-	Method      string `json:"method"` // clone, reflink, block clone, hardlink, copy
+	Method      string `json:"method"` // clone, reflink, block clone, hardlink, copy, compressed copy
 	ParentMtime int64  `json:"parent_mtime,omitempty"`
 	GitRepo     string `json:"git_repo,omitempty"` // set when git would have overwritten a tracked file
 	// Disk is the extra disk the snapshot took when it was made: zero for
@@ -138,7 +138,8 @@ type Snapshot struct {
 	Millis   float64     `json:"millis"`
 	Restored *time.Time  `json:"restored,omitempty"`
 
-	vols map[string]string // volume root -> this snapshot's dir in its volume store
+	vols          map[string]string // volume root -> this snapshot's dir in its volume store
+	compressTried bool
 }
 
 // Dir returns the snapshot's directory.
