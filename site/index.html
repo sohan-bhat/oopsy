@@ -141,7 +141,7 @@
     <ol class="steps" role="list">
       <li class="step">
         <h3 class="step__title">It hooks in</h3>
-        <p><code>oops init</code> adds a small hook to your shell and to your coding agents, so every command passes Oopsy on its way to run.</p>
+        <p><code>oops init</code> adds a small hook to your shell and to your coding agents, so every command and every agent file edit passes Oopsy on its way to run. Turn on <code>oops watch</code> to keep the previous version of files you save in an editor too.</p>
       </li>
       <li class="step">
         <h3 class="step__title">It snapshots first</h3>
@@ -200,9 +200,8 @@
     <div>
       <h2 class="h2">What it does not catch</h2>
       <ul class="limits" role="list" id="limits">
-        <li>A program that writes into a file in place on NTFS, or a statically linked one doing so on ext4. The project mirror there shares the file through a hard link, so Oopsy sees the change but cannot keep the old version, and says so.</li>
+        <li>With <code>oops watch</code> off, a program that writes into a file in place on NTFS, or a statically linked one doing so on ext4. The project mirror there shares the file through a hard link, so Oopsy sees the change but cannot keep the old version, and says so. Editor saves are kept with watch on.</li>
         <li>A rebuildable folder like <code>node_modules</code> deleted by a program that never names it anywhere Oopsy can read. Rebuild it.</li>
-        <li>File edits made in an editor, or by an agent's own edit tool instead of the shell.</li>
         <li>Other machines. Commands run over <code>ssh</code> change another computer, so undo there needs Oopsy installed there too.</li>
         <li>Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, files or disks inside cloud resources.</li>
         <li>Database changes that skip the proxy, unless you turn on <code>oops db protect</code>. With it on, inserts and <code>ALTER</code> statements are still not reversed.</li>
@@ -233,6 +232,10 @@
       <details class="qa">
         <summary>Does it catch make clean and my own scripts?</summary>
         <p>Yes. Besides reading the command line, Oopsy keeps a mirror of each project you work in, where every file is a copy on write clone or a hard link, so it costs almost no disk. A quick walk before each command keeps it current, and whatever the command changes or deletes moves into its snapshot. Read only commands like <code>ls</code> and <code>git status</code> are skipped at no cost. Folders you can rebuild, like <code>node_modules</code>, are saved whole only when a command or its script names them.</p>
+      </details>
+      <details class="qa">
+        <summary>What about my editor and my agent's edit tool?</summary>
+        <p>Claude Code, Codex, Cursor and Gemini CLI file edits are saved before they happen, once per version, compressed, so repeats cost nothing; <code>oops</code> undoes the last one. For saves in your editor, run <code>oops watch on</code>: a small background service keeps the previous version of every file you change, and <code>oops list --watch</code> shows them.</p>
       </details>
       <details class="qa">
         <summary>How much disk does it use?</summary>
