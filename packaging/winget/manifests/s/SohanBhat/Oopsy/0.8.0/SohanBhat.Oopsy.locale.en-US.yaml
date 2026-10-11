@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: SohanBhat.Oopsy
+PackageVersion: 0.8.0
+PackageLocale: en-US
+Publisher: Sohan Bhat
+PublisherUrl: https://github.com/sohan-bhat
+PackageName: Oopsy
+PackageUrl: https://sohan-bhat.github.io/oopsy/
+License: MIT
+LicenseUrl: https://github.com/sohan-bhat/oopsy/blob/main/LICENSE
+ShortDescription: Undo for rm -rf and everything else you wish you had not run.
+Description: Oopsy snapshots files, git state and Postgres data right before destructive commands run, whether you typed them or an AI coding agent did. Type oops to get it back.
+Moniker: oopsy
+Tags:
+  - undo
+  - backup
+  - cli
+  - git
+  - powershell
+ReleaseNotesUrl: https://github.com/sohan-bhat/oopsy/releases/tag/v0.8.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
