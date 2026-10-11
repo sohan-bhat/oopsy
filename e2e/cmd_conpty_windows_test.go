@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -129,6 +131,30 @@ func (c *conPTY) Wait(want string, timeout time.Duration) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	c.t.Fatalf("cmd.exe never showed %q; screen so far:\n%s", want, c.Output())
+}
+
+// Settle waits until cmd.exe is back at its prompt with nothing left to
+// read. It runs a tiny calculation whose answer never appears in what was
+// typed, so a match means the line before it has fully finished. Typing the
+// next command before that can lose it on slow runners.
+func (c *conPTY) Settle(k int) {
+	c.t.Helper()
+	c.Type(fmt.Sprintf("set /a 7000+%d\r", k))
+	c.Wait(fmt.Sprint(7000+k), 60*time.Second)
+}
+
+// Gone waits until path no longer exists, which is how the tests know a
+// typed delete really ran.
+func (c *conPTY) Gone(path, what string) {
+	c.t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	c.t.Fatalf("%s did not run:\n%s", what, c.Output())
 }
 
 // Exited waits for cmd.exe to end.

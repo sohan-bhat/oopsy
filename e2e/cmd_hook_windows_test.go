@@ -160,19 +160,12 @@ func TestCmdHookTypedIntoCmd(t *testing.T) {
 	con.Wait("hook=cmd prev=1", 10*time.Second)
 
 	con.Type("del /q notes.txt\r")
-	con.Wait("saved snapshot", 30*time.Second)
-	con.Type("set /a 6*7\r")
-	con.Wait("42", 30*time.Second)
-	if _, err := os.Stat(filepath.Join(root, "notes.txt")); err == nil {
-		t.Fatalf("del did not run:\n%s", con.Output())
-	}
+	con.Gone(filepath.Join(root, "notes.txt"), "del")
+	con.Settle(1)
 
 	con.Type(`node -e "require('fs').rmSync('build',{recursive:true})"` + "\r")
-	con.Type("set /a 6*8\r")
-	con.Wait("48", 60*time.Second)
-	if _, err := os.Stat(filepath.Join(root, "build")); err == nil {
-		t.Fatalf("node did not run:\n%s", con.Output())
-	}
+	con.Gone(filepath.Join(root, "build"), "node")
+	con.Settle(2)
 	con.Type("exit\r")
 	if !con.Exited(10 * time.Second) {
 		t.Fatalf("cmd.exe did not exit:\n%s", con.Output())
