@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Oopsy: undo for rm -rf</title>
-<meta name="description" content="Oopsy is an open source CLI that makes destructive commands undoable, for people and AI coding agents. It snapshots deleted and overwritten files, git resets, branches, stashes and force pushes, plus Postgres tables, rows and columns, right before they are destroyed. Type oops and it is back.">
+<meta name="description" content="Oopsy is an open source CLI that makes destructive commands undoable, for people and AI coding agents. It snapshots files deleted or overwritten by any command, git resets, branches, stashes and force pushes, Postgres tables, rows and databases, and Kubernetes, Terraform and Docker state, right before they are destroyed. Type oops and it is back.">
 <meta name="theme-color" content="#F5A7B8">
 <link rel="canonical" href="https://sohan-bhat.github.io/oopsy/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -190,7 +190,7 @@
     <div>
       <h2 id="fit-title" class="h2">Works with</h2>
       <dl class="works">
-        <div class="works__row"><dt>Shells</dt><dd><span>zsh</span><span>bash</span><span>fish</span><span>PowerShell</span><span>Git Bash</span></dd></div>
+        <div class="works__row"><dt>Shells</dt><dd><span>zsh</span><span>bash</span><span>fish</span><span>PowerShell</span><span>Git Bash</span><span>cmd.exe</span></dd></div>
         <div class="works__row"><dt>Agents</dt><dd><span>Claude Code</span><span>Codex CLI</span><span>Cursor</span><span>Gemini CLI</span></dd></div>
         <div class="works__row"><dt>Databases</dt><dd><span>Postgres</span></dd></div>
         <div class="works__row"><dt>Infra</dt><dd><span>kubectl</span><span>Terraform</span><span>Docker volumes</span><span>Helm</span></dd></div>
@@ -200,14 +200,17 @@
     <div>
       <h2 class="h2">What it does not catch</h2>
       <ul class="limits" role="list" id="limits">
-        <li>With <code>oops watch</code> off, a program that writes into a file in place on NTFS, or a statically linked one doing so on ext4. The project mirror there shares the file through a hard link, so Oopsy sees the change but cannot keep the old version, and says so. Editor saves are kept with watch on.</li>
-        <li>A rebuildable folder like <code>node_modules</code> deleted by a program that never names it anywhere Oopsy can read. Rebuild it.</li>
         <li>Other machines. Commands run over <code>ssh</code> change another computer, so undo there needs Oopsy installed there too.</li>
-        <li>Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, files or disks inside cloud resources.</li>
+        <li>A full disk. Oopsy skips a copy that would break its free space floor, 5% of the disk between 2 and 20 GB, and tells you right then. Clones and hard links never need the room.</li>
+        <li>A dead disk. Snapshots live on the same disk as your files unless you point <code>oops config store</code> at a second drive.</li>
+      </ul>
+      <h3 class="limits__sub">Only partly covered</h3>
+      <ul class="limits" role="list">
+        <li>With <code>oops watch</code> off, a program that writes into a file in place on NTFS, or a statically linked one doing so on ext4. Oopsy sees the change but cannot keep the old version there, and says so.</li>
+        <li>A rebuildable folder like <code>node_modules</code> deleted by a program that never names it anywhere Oopsy can read. Rebuild it.</li>
+        <li>Data inside cloud resources and Kubernetes volumes. Oopsy saves the objects, the Terraform state, Docker volumes and Helm releases, not the rows, files or disks inside them.</li>
         <li>Database changes that skip the proxy, unless you turn on <code>oops db protect</code>. With it on, inserts and <code>ALTER</code> statements are still not reversed.</li>
-        <li>An overwrite on a disk without copy on write, like NTFS and ext4, when the copy would leave less than the free space floor. Oopsy skips it and tells you right then.</li>
-        <li>Commands typed straight into cmd.exe, which has no hook. PowerShell, Git Bash and agent commands are covered.</li>
-        <li>A dead disk. Snapshots live next to your files, so keep a real backup too.</li>
+        <li>Without Clink, cmd.exe lines that start with a command other than <code>del</code>, <code>rd</code>, <code>move</code>, <code>copy</code>, <code>git</code>, <code>npm</code>, <code>node</code>, <code>python</code>, <code>make</code> and a few more.</li>
       </ul>
     </div>
   </div>
@@ -239,11 +242,11 @@
       </details>
       <details class="qa">
         <summary>How much disk does it use?</summary>
-        <p>On APFS, Btrfs, XFS, ReFS and Windows Dev Drives, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On NTFS and ext4, a command that only deletes is saved with hard links, which cost nothing either. Overwrites there get a real copy, compressed with NTFS compression on Windows and zstd elsewhere, of any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, between 2 and 20 GB. Snapshots are kept for 7 days and capped at 5 GB in total, and you can change both in <code>~/.oops/config.json</code>.</p>
+        <p>On APFS, Btrfs, XFS, ReFS and Windows Dev Drives, a snapshot is a copy on write clone. It shares storage with the original and costs almost nothing until the files change. On NTFS and ext4, a command that only deletes is saved with hard links, which cost nothing either. Overwrites there get a real copy, compressed with NTFS compression on Windows and zstd elsewhere, of any size as long as the disk keeps a safe floor free afterwards: 5% of the disk, between 2 and 20 GB. A project mirror costs a few hundred bytes per file. Snapshots are kept for 7 days and capped at 5 GB in total, and you can change both with <code>oops config</code>. To survive a dead disk, <code>oops config store</code> moves everything to a second drive, at the cost of one compressed copy of each project there.</p>
       </details>
       <details class="qa">
         <summary>Does it work on Windows?</summary>
-        <p>Yes. Install it with Scoop or the PowerShell line above, then run <code>oops init</code>. It hooks PowerShell 7, Windows PowerShell and Git Bash, plus Claude Code, Codex CLI, Cursor and Gemini CLI, whichever shell they run commands in. Files another program has locked are skipped with a warning.</p>
+        <p>Yes. Install it with Scoop or the PowerShell line above, then run <code>oops init</code>. It hooks PowerShell 7, Windows PowerShell, Git Bash and cmd.exe (every typed line with Clink, the common destructive commands without it), plus Claude Code, Codex CLI, Cursor and Gemini CLI, whichever shell they run commands in. Files another program has locked are skipped with a warning.</p>
       </details>
     </div>
   </div>

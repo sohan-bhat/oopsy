@@ -462,6 +462,8 @@ button { font: inherit; color: inherit; }
   position: relative; padding: 14px 0 14px 32px; border-top: 1px solid var(--line); color: var(--ink);
 }
 .limits li:last-child { border-bottom: 1px solid var(--line); }
+.limits__sub { font-size: 20px; font-weight: 700; letter-spacing: -.01em; margin: 40px 0 0; }
+.limits__sub + .limits { margin-top: 12px; }
 .limits li::before {
   content: ""; position: absolute; left: 2px; top: 20px; width: 12px; height: 12px; border-radius: 4px;
   background: var(--eraser); border: 2px solid var(--graphite);
