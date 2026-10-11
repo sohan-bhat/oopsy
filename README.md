@@ -2,6 +2,10 @@
 
 **Undo for `rm -rf`, and everything else you wish you hadn't run.** Files (deletes and overwrites, by any command, including `make clean`, npm scripts and scripts Oopsy has never seen), git (resets, branches, stashes, force pushes) and Postgres (drops, deletes, bad updates). Oopsy snapshots it right before it is destroyed, whether you typed the command or your AI agent did. Type `oops` and it is back.
 
+[![Watch the Oopsy demo](docs/oopsy-demo-poster.jpg)](https://sohan-bhat.github.io/oopsy/oopsy-demo.mp4)
+
+[Watch the 36 second demo](https://sohan-bhat.github.io/oopsy/oopsy-demo.mp4)
+
 Website: https://sohan-bhat.github.io/oopsy/
 
 Runs on macOS, Linux and Windows.
