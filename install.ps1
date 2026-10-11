@@ -27,8 +27,18 @@ function Install-Oopsy {
   if ($version) {
     $version = 'v' + $version.TrimStart('v')
   } else {
-    $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'oopsy-install' }).tag_name
-    if (-not $version) { throw 'oopsy install: could not find the latest release' }
+    try {
+      $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'oopsy-install' }).tag_name
+    } catch { $version = $null }
+    if (-not $version) {
+      # The API limits anonymous calls; the release page redirect has the tag too.
+      $r = Invoke-WebRequest "https://github.com/$repo/releases/latest" -UseBasicParsing
+      $final = $null
+      try { $final = $r.BaseResponse.ResponseUri.AbsoluteUri } catch { }
+      if (-not $final) { try { $final = $r.BaseResponse.RequestMessage.RequestUri.AbsoluteUri } catch { } }
+      if ($final -match '/tag/([^/]+)$') { $version = $Matches[1] }
+    }
+    if (-not $version) { throw 'oopsy install: could not find the latest release; pin one with $env:OOPS_VERSION' }
   }
   $plain = $version.TrimStart('v')
   $archive = "oopsy_${plain}_windows_${arch}.zip"
