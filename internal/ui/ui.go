@@ -16,9 +16,10 @@ import (
 var (
 	color = os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb" && isatty.IsTerminal(os.Stdout.Fd())
 
-	accent  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8913A")).Bold(true)
+	// Brand colors from the site: eraser pink for accents, pencil yellow for warnings.
+	accent  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E3879C")).Bold(true)
 	good    = lipgloss.NewStyle().Foreground(lipgloss.Color("#4CB782"))
-	warn    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5B84B"))
+	warn    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F6C531"))
 	bad     = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5534B"))
 	dim     = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B8B8B"))
 	bold    = lipgloss.NewStyle().Bold(true)
