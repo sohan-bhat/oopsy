@@ -41,8 +41,14 @@ version="${OOPS_VERSION:-${OOPSY_VERSION:-}}"
 if [ -n "$version" ]; then
   version="v${version#v}"
 else
-  version="$(fetch "https://api.github.com/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$version" ] || fail "could not find the latest release"
+  version="$(fetch "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)" || true
+  if [ -z "$version" ] && command -v curl >/dev/null 2>&1; then
+    # The API limits anonymous calls; the release page redirect has the tag too.
+    url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest" 2>/dev/null || true)"
+    version="${url##*/tag/}"
+    [ "$version" = "$url" ] && version=""
+  fi
+  [ -n "$version" ] || fail "could not find the latest release; pin one with OOPS_VERSION=0.8.0"
 fi
 plain="${version#v}"
 archive="oopsy_${plain}_${os}_${arch}.tar.gz"
