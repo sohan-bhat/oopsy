@@ -373,6 +373,8 @@ button { font: inherit; color: inherit; }
   font-size: clamp(28px, 5vw, 40px); line-height: 1.08;
 }
 
+.film { padding: 72px 0 0; }
+.film__video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; margin-top: 24px; border: 2px solid var(--graphite); border-radius: var(--r-lg); background: var(--graphite); }
 .why { padding: 72px 0 64px; }
 .why__lede { margin-top: 12px; font-size: 19px; color: var(--muted); max-width: 36em; }
 .incidents { list-style: none; padding: 0; margin: 36px 0 0; display: grid; gap: 16px; }
