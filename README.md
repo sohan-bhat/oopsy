@@ -71,7 +71,7 @@ Then turn on the hooks once:
 oops init
 ```
 
-This adds a small hook to zsh, bash, fish and PowerShell (Git Bash too on Windows), and a pre tool hook to Claude Code, Codex CLI, Cursor and Gemini CLI if they are installed. Every file it touches is backed up first, and `oops uninstall` removes it all.
+This adds a small hook to zsh, bash, fish and PowerShell (Git Bash too on Windows), and hooks before and after each shell command and file edit to Claude Code, Codex CLI, Cursor and Gemini CLI if they are installed. Every file it touches is backed up first, and `oops uninstall` removes it all.
 
 ## Use
 
@@ -80,6 +80,7 @@ oops                 # undo the last destructive command (asks first, -y to skip
 oops list            # recent snapshots
 oops undo 12         # restore a specific one; oops show 12 and oops diff 12 to look first
 oops doctor          # check hooks, copy on write support and hook speed
+oops watch on        # optional: keep versions of editor saves too (oops watch off, oops watch status)
 ```
 
 For Postgres, run your app or agent through the proxy:
@@ -113,6 +114,10 @@ When the folder is on another drive than your home, hard links and clones go to 
 
 PowerShell has no preexec hook, so Oopsy wraps the function PSReadLine uses to read each line and checks it after you press Enter, before it runs, and runs the after step from the prompt function. The PowerShell parser knows `Remove-Item` and its aliases, `Move-Item`, `Copy-Item`, `Set-Content`, `Out-File`, redirects and pipelines like `Get-ChildItem *.log | Remove-Item`. Agent commands on Windows are read as bash, PowerShell and cmd.exe at once.
 
+**Agent edit tools.** Claude Code's Edit, Write, MultiEdit and NotebookEdit, Codex's `apply_patch`, and Gemini CLI's `write_file` and `replace` save the file they are about to change, once per version: versions are stored by content hash, zstd compressed, so an identical version costs nothing (a typical source file takes a few hundred bytes to 2 KB, plus about 700 bytes of metadata). `oops` undoes the last edit. Cursor has no hook before an edit, so Oopsy recovers the previous version after it, from the project mirror or by reversing the edit; a full rewrite in Cursor cannot be recovered that way. A file an edit creates is not removed by undo.
+
+**Watch mode.** `oops watch on` runs a small background service (launchd on macOS, a systemd user service on Linux, a Scheduled Task on Windows) that follows your projects with FSEvents, inotify or ReadDirectoryChangesW. Changes made while no command is running, like editor saves, keep their previous version as a snapshot (`oops list --watch` shows them; plain `oops` never undoes an edit, only deletions and commands; `oops undo <id>` restores one). Files over 50 MB are skipped (`oops config watch_max_file_mb`). On NTFS and ext4 it keeps a compressed copy of every mirrored file, so in place writes by any program are covered while it runs; that costs about 30 to 80% of your source's size there, and nothing on APFS, btrfs, XFS and ReFS. It uses about 20 to 30 MB of memory with three 10,000 file projects. Saves less than 300 ms apart keep only the oldest version.
+
 Infrastructure commands get their state saved first, by the tool itself, with a timeout so they are never held up:
 
 * `kubectl delete`, `apply` and `replace` (and `oc`): the exact targets are saved as JSON with `kubectl get`, pinned to the current context. Undo recreates deleted objects through the API and puts changed ones back; objects an apply created are listed with the command to delete them, never deleted for you. `kubectl delete namespace` also saves the common objects inside it. Data inside volumes is not saved, so a recreated volume claim comes back empty, and undo says so.
@@ -132,12 +137,11 @@ For changes that do not go through the proxy, `oops db protect` (optional, needs
 
 ## What it does not catch
 
-* A program that writes into a file in place on NTFS, or a statically linked program doing so on ext4. The mirror there uses hard links, which share the file, so Oopsy notices the change but cannot keep the old version, and says so.
+* With `oops watch` off: a program that writes into a file in place on NTFS, or a statically linked program doing so on ext4. The mirror there uses hard links, which share the file, so Oopsy notices the change but cannot keep the old version, and says so. Editor saves are covered only with watch on.
 * A rebuildable folder like `node_modules` deleted by a program that does not name it anywhere Oopsy can read. Rebuild it.
 * Commands run right in your home folder or a system folder, and projects over 50,000 files: only what the command line names is saved there.
 * Other machines: commands run over `ssh` or `rsync` to another host change another computer, so undo there needs Oopsy installed there too.
 * Data inside cloud resources and Kubernetes volumes. Oopsy saves Kubernetes objects, Terraform state, Docker volumes and Helm releases, not the rows, objects or disks inside cloud resources.
-* File edits made by an editor or by an agent's own edit tool rather than the shell.
 * Database changes that skip the proxy when `oops db protect` is off. With it on, inserts, `ALTER` statements and drops run from inside a function are still not reversed. `DROP INDEX` is not saved, nor row level security policies, and an `UPDATE` on a table without a primary key is undone by restoring the whole table.
 * Overwrites on a disk without copy on write (NTFS, ext4) when the copy would leave less than the free space floor: Oopsy skips that copy and tells you.
 * Undoing `git push --force` needs the old commit in your local repo, which it is if you fetched before pushing.
