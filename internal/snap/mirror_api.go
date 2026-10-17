@@ -49,7 +49,7 @@ func tooBroad(p string) bool {
 	}
 	if home != "" {
 		for _, d := range homeStores() {
-			if within(p, filepath.Join(home, d)) {
+			if store := filepath.Join(home, d); within(p, store) && !inTempUnder(p, store) {
 				return true
 			}
 		}
@@ -69,6 +69,18 @@ func tooBroad(p string) bool {
 // grows.
 func homeStores() []string {
 	return []string{"Library", "Applications", ".Trash", ".cache", ".npm", ".cargo", ".rustup", ".gradle", ".m2", "go/pkg", filepath.Join("AppData", "Local"), filepath.Join("AppData", "Roaming")}
+}
+
+// inTempUnder reports a path below a temp folder that itself sits inside
+// store. On Windows the temp folder lives in AppData\Local, and a project in
+// it is still a project.
+func inTempUnder(p, store string) bool {
+	for _, t := range tempRoots() {
+		if within(t, store) && within(p, t) && pathKey(filepath.Clean(p)) != pathKey(t) {
+			return true
+		}
+	}
+	return false
 }
 
 // tempRoots lists the system temp folders, under their real names too.

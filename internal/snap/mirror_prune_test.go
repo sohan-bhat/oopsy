@@ -122,3 +122,23 @@ func TestMirrorSweepDueWaitsAnHour(t *testing.T) {
 		t.Error("the sweep did not come due after an hour")
 	}
 }
+
+// On Windows the temp folder lives inside AppData\Local. A project in it is
+// mirrored, while the rest of AppData\Local is not.
+func TestTempInsideAppDataStillMirrors(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	home := filepath.Join(root, "home")
+	tmp := filepath.Join(home, "AppData", "Local", "Temp")
+	os.MkdirAll(tmp, 0o700)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("TMPDIR", tmp)
+	t.Setenv("TMP", tmp)
+	t.Setenv("TEMP", tmp)
+	if p := filepath.Join(tmp, "project"); tooBroad(p) {
+		t.Errorf("%s is a project in the temp folder and should be mirrored", p)
+	}
+	if p := filepath.Join(home, "AppData", "Local", "Programs"); !tooBroad(p) {
+		t.Errorf("%s should be too broad to mirror", p)
+	}
+}
