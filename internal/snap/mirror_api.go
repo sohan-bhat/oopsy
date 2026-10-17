@@ -47,7 +47,47 @@ func tooBroad(p string) bool {
 			return true
 		}
 	}
+	if home != "" {
+		for _, d := range homeStores() {
+			if within(p, filepath.Join(home, d)) {
+				return true
+			}
+		}
+	}
+	// A temp folder holds every program's scratch at once. A project inside
+	// one is mirrored, but never the temp folder itself or anything above it.
+	for _, t := range tempRoots() {
+		if within(t, p) {
+			return true
+		}
+	}
 	return false
+}
+
+// homeStores are folders under home that hold apps, caches and settings
+// rather than projects. They churn on their own, so a mirror of them only
+// grows.
+func homeStores() []string {
+	return []string{"Library", "Applications", ".Trash", ".cache", ".npm", ".cargo", ".rustup", ".gradle", ".m2", "go/pkg", filepath.Join("AppData", "Local"), filepath.Join("AppData", "Roaming")}
+}
+
+// tempRoots lists the system temp folders, under their real names too.
+func tempRoots() []string {
+	list := []string{os.TempDir()}
+	if os.PathSeparator != '\\' {
+		list = append(list, "/tmp", "/var/tmp", "/var/folders", "/private/tmp", "/private/var/tmp", "/private/var/folders")
+	}
+	var out []string
+	for _, t := range list {
+		if t == "" {
+			continue
+		}
+		out = append(out, filepath.Clean(t))
+		if r, err := filepath.EvalSymlinks(t); err == nil && r != t {
+			out = append(out, filepath.Clean(r))
+		}
+	}
+	return out
 }
 
 func systemDirs() []string {
@@ -58,7 +98,7 @@ func systemDirs() []string {
 		}
 		return []string{win, os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), os.Getenv("ProgramData")}
 	}
-	return []string{"/usr", "/bin", "/sbin", "/etc", "/System", "/Library", "/opt/homebrew", "/proc", "/sys", "/dev"}
+	return []string{"/usr", "/bin", "/sbin", "/etc", "/System", "/Library", "/Applications", "/opt", "/proc", "/sys", "/dev"}
 }
 
 func mirrorLimit() int {
