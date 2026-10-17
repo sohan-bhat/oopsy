@@ -604,24 +604,32 @@ func pruneCmd() *cobra.Command {
 	var all bool
 	c := &cobra.Command{
 		Use:   "prune",
-		Short: "Delete old snapshots (keeps 7 days and 5 GB by default)",
+		Short: "Delete old snapshots and unused project mirrors (keeps 7 days and 5 GB by default)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := snap.LoadConfig()
-			if all && ui.Interactive() && !ui.Confirm("Delete every snapshot?") {
+			if all && ui.Interactive() && !ui.Confirm("Delete every snapshot and project mirror?") {
 				fmt.Println("Nothing changed.")
 				return nil
 			}
+			mode := snap.MirrorsStale
+			if all {
+				mode = snap.MirrorsAll
+			}
+			mres := snap.PruneMirrors(cfg, mode)
 			res, err := snap.Prune(cfg, all)
 			if err != nil {
 				return err
 			}
 			n, total := snap.Usage()
 			fmt.Printf("Removed %s (%s). %s left, %s.\n", ui.Plural(res.Removed, "snapshot"), ui.Bytes(res.Bytes), ui.Plural(n, "snapshot"), ui.Bytes(total))
+			if mres.Removed > 0 {
+				fmt.Printf("Removed %s of folders that are gone or unused, %s freed.\n", ui.Plural(mres.Removed, "project mirror"), ui.Bytes(mres.Freed))
+			}
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&all, "all", false, "delete every snapshot")
+	c.Flags().BoolVar(&all, "all", false, "delete every snapshot and idle project mirror")
 	return c
 }
 

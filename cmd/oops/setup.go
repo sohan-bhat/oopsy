@@ -226,6 +226,20 @@ func statusCmd() *cobra.Command {
 			}
 			fmt.Printf("  keeping %d days and up to %s\n", cfg.KeepDays, ui.Bytes(cfg.MaxBytes))
 			fmt.Printf("  storage: %s\n", storageKind())
+			if mirrors := snap.Mirrors(); len(mirrors) > 0 {
+				gone := 0
+				for _, m := range mirrors {
+					if _, err := os.Lstat(m.Root); os.IsNotExist(err) {
+						gone++
+					}
+				}
+				fmt.Println()
+				fmt.Println(ui.Accent("Project mirrors"))
+				fmt.Printf("  %s, unused ones are deleted after %d days\n", ui.Plural(len(mirrors), "mirror"), cfg.KeepDays)
+				if gone > 0 {
+					fmt.Printf("  %s for folders that are gone, kept for undo until then (oops mirror prune --gone deletes them now)\n", ui.Plural(gone, "mirror"))
+				}
+			}
 			return nil
 		},
 	}

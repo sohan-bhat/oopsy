@@ -23,7 +23,11 @@ func mirrorCmd() *cobra.Command {
 				return nil
 			}
 			for _, m := range list {
-				fmt.Printf("%s  %s, %s, index %s, synced %s\n", ui.Bold(ui.HomeRel(m.Root)), ui.Plural(m.Files, "file"), m.Method, ui.Bytes(m.Bytes), ago(m.Synced))
+				gone := ""
+				if _, err := os.Lstat(m.Root); os.IsNotExist(err) {
+					gone = ui.Dim(" (folder is gone)")
+				}
+				fmt.Printf("%s%s  %s, %s, index %s, synced %s\n", ui.Bold(ui.HomeRel(m.Root)), gone, ui.Plural(m.Files, "file"), m.Method, ui.Bytes(m.Bytes), ago(m.Synced))
 			}
 			return nil
 		},
@@ -49,6 +53,22 @@ func mirrorCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.AddCommand(build)
+	var gone bool
+	prune := &cobra.Command{
+		Use:   "prune",
+		Short: "Delete mirrors of folders that are unused for keep_days (oops does this by itself every hour)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := snap.MirrorsStale
+			if gone {
+				mode = snap.MirrorsGone
+			}
+			res := snap.PruneMirrors(snap.LoadConfig(), mode)
+			fmt.Printf("Removed %s, %s freed.\n", ui.Plural(res.Removed, "mirror"), ui.Bytes(res.Freed))
+			return nil
+		},
+	}
+	prune.Flags().BoolVar(&gone, "gone", false, "also delete mirrors of folders that no longer exist, giving up their undo")
+	c.AddCommand(build, prune)
 	return c
 }

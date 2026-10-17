@@ -106,8 +106,12 @@ func within(p, root string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// afterCommand attributes what the finished command changed.
+// afterCommand attributes what the finished command changed, and starts
+// the mirror sweep in the background when it is due.
 func afterCommand(source, session string, stdout, stderr io.Writer) {
+	if snap.MirrorSweepDue(snap.LoadConfig()) {
+		startBackground("mirror", "prune")
+	}
 	for _, res := range snap.FinishPending(session) {
 		if res == nil || res.Snapshot == nil {
 			continue

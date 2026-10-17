@@ -110,6 +110,7 @@ func Run(ctx context.Context, opt Options) error {
 		case <-prune.C:
 			snap.PruneWatch(keepWatch)
 			_, _ = snap.Prune(snap.LoadConfig(), false)
+			snap.PruneMirrors(snap.LoadConfig(), snap.MirrorsStale)
 		case <-status.C:
 			d.writeStatus()
 		case <-tick.C:
