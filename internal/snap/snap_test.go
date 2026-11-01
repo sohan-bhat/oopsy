@@ -178,3 +178,37 @@ func TestHardLinkKeepsReadOnly(t *testing.T) {
 		t.Error("a read only file was linked back; clearing it later would change the snapshot")
 	}
 }
+
+// A hook cut off while saving leaves a snapshot folder without meta.json.
+// PruneOrphans deletes it, but only while no snapshot is being made, and
+// never touches a complete snapshot.
+func TestPruneOrphansDeletesUnfinishedSnapshots(t *testing.T) {
+	work := testEnv(t)
+	done := create(t, work, classify.Action{Program: "rm", Paths: []string{filepath.Join(work, "a.txt")}, Delete: true})
+	orphan := SnapDir(done.ID + 1)
+	writeTree(t, orphan, map[string]string{"files/0/a.txt": "alpha\n"})
+	leftover := SnapDir(done.ID+2) + ".pruning"
+	writeTree(t, leftover, map[string]string{"files/0/b.txt": "bravo\n"})
+
+	l, err := acquire()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := PruneOrphans(); n != 1 {
+		t.Errorf("with a snapshot being made: removed %d, want only the folder already moved aside", n)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Error("deleted a folder without metadata while a snapshot was being made")
+	}
+	l.release()
+
+	if n := PruneOrphans(); n != 1 {
+		t.Errorf("removed %d, want 1", n)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Error("the unfinished snapshot is still there")
+	}
+	if _, err := Load(done.ID); err != nil {
+		t.Errorf("the complete snapshot is gone: %v", err)
+	}
+}

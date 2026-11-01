@@ -621,6 +621,9 @@ func pruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if orphans := snap.PruneOrphans(); orphans > 0 {
+				fmt.Printf("Removed %s left unfinished by a command that was cut off.\n", ui.Plural(orphans, "snapshot"))
+			}
 			n, total := snap.Usage()
 			fmt.Printf("Removed %s (%s). %s left, %s.\n", ui.Plural(res.Removed, "snapshot"), ui.Bytes(res.Bytes), ui.Plural(n, "snapshot"), ui.Bytes(total))
 			if mres.Removed > 0 {

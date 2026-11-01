@@ -473,6 +473,39 @@ func Prune(cfg Config, all bool) (PruneResult, error) {
 	return res, nil
 }
 
+// PruneOrphans deletes snapshot folders that have no metadata and reports
+// how many it removed. Create writes meta.json last, so a hook cut off
+// while saving (by an agent's hook timeout, say) leaves its copies where
+// List, and so Prune, never sees them, and nothing can restore them. A
+// snapshot still being saved has no metadata either, so orphans are only
+// picked while no snapshot is being made. They are moved aside under the
+// lock and deleted after it is let go, since deleting a big tree is slow.
+func PruneOrphans() int {
+	dir := snapsDir()
+	if l := tryLockAt(filepath.Join(Dir(), "lock")); l != nil {
+		ents, _ := os.ReadDir(dir)
+		for _, e := range ents {
+			if _, err := strconv.Atoi(e.Name()); err != nil || !e.IsDir() {
+				continue
+			}
+			p := filepath.Join(dir, e.Name())
+			if _, err := os.Lstat(filepath.Join(p, "meta.json")); errors.Is(err, fs.ErrNotExist) {
+				_ = os.Rename(p, p+".pruning")
+			}
+		}
+		l.release()
+	}
+	// This also finishes folders a sweep that was interrupted moved aside.
+	n := 0
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if e.IsDir() && strings.HasSuffix(e.Name(), ".pruning") && forceRemove(filepath.Join(dir, e.Name())) == nil {
+			n++
+		}
+	}
+	return n
+}
+
 func (c Config) rebuildableDays() int {
 	if c.RebuildableKeepDays > 0 {
 		return c.RebuildableKeepDays

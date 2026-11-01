@@ -65,6 +65,11 @@ func mirrorCmd() *cobra.Command {
 			}
 			res := snap.PruneMirrors(snap.LoadConfig(), mode)
 			fmt.Printf("Removed %s, %s freed.\n", ui.Plural(res.Removed, "mirror"), ui.Bytes(res.Freed))
+			// The hourly background sweep runs this command, so it also
+			// clears snapshots left unfinished by a hook that was cut off.
+			if n := snap.PruneOrphans(); n > 0 {
+				fmt.Printf("Removed %s left unfinished by a command that was cut off.\n", ui.Plural(n, "snapshot"))
+			}
 			return nil
 		},
 	}
