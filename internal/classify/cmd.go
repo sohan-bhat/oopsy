@@ -352,7 +352,7 @@ func (c *cmdState) dispatchOK(argv []string, resolved bool) {
 	case "bash", "sh", "wsl":
 		bs := newState(c.cwd, c.rawEnv)
 		if name == "wsl" {
-			bs.dispatch(args, false)
+			bs.dispatch(args, allResolved)
 		} else {
 			bs.shellC(args)
 		}

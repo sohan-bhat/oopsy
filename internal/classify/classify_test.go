@@ -566,3 +566,25 @@ func TestDeleteOnly(t *testing.T) {
 		}
 	}
 }
+
+// sed, perl and find only write when an option says so. An operand that
+// could not be expanded cannot be that option, so a read only line must not
+// save the whole folder; an unknown word that could be an option still does.
+func TestUnresolvedOperandsOfOptionGatedPrograms(t *testing.T) {
+	dir := fixture(t)
+	env := baseEnv(dir)
+	for _, c := range []tc{
+		{cmd: `sed -n "$(grep -n content a.txt | cut -d: -f1)p" a.txt`, want: false},
+		{cmd: `n=$(grep -c content a.txt); sed -n "${n},$((n+5))p" a.txt`, want: false},
+		{cmd: `find $(dirname a.txt)/dir1 -name x`, want: false},
+		{cmd: `perl -ne "print if /$UNSET_RE/" a.txt`, want: false},
+		{cmd: `sed $UNSET_FLAGS 's/a/b/' a.txt`, want: true, broad: true},
+		{cmd: `sed -n p "$(cat list.txt)"`, want: true, broad: true},
+		{cmd: `sed "-$UNSET_FLAG" 's/a/b/' a.txt`, want: true, broad: true},
+		{cmd: `find . -name x -exec $(dirname x)/rm {} +`, want: true, broad: true},
+		{cmd: `sed -i "$(cat script)" a.txt`, want: true, paths: []string{"a.txt"}},
+		{cmd: `cp a.txt "$(cat dest)"/x`, want: true, broad: true},
+	} {
+		check(t, dir, env, c)
+	}
+}

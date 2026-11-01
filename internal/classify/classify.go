@@ -152,7 +152,7 @@ func (s *state) rough(cmd string) {
 			argv = append(argv, strings.Trim(w, `'"`))
 		}
 		if len(argv) > 0 {
-			s.dispatch(argv, false)
+			s.dispatch(argv, allResolved)
 		}
 	}
 }
@@ -193,7 +193,11 @@ func (s *state) command(cmd syntax.Command) {
 		}
 		argv, ok := s.fields(c.Args)
 		if len(argv) > 0 {
-			s.dispatch(argv, !ok)
+			unres := allResolved
+			if !ok {
+				unres = s.unresolvedKind(c.Args)
+			}
+			s.dispatch(argv, unres)
 		}
 		for k, v := range saved {
 			if v == "" {
@@ -447,9 +451,81 @@ func progName(arg string) string {
 	return n
 }
 
-// dispatch looks at one simple command. unresolved means some operands could
-// not be expanded, so a broader snapshot is taken.
-func (s *state) dispatch(argv []string, unresolved bool) {
+// unresolved says what part of a command line could not be expanded.
+type unresolved int
+
+const (
+	allResolved unresolved = iota
+	// someOperands: every word that could not be expanded holds literal
+	// text that does not start with a dash, so none of them is an option.
+	someOperands
+	// someWords: any word could be unknown, options included.
+	someWords
+)
+
+// unresolvedKind tells whether any word that could not be expanded might
+// be an option. It might when its text starts with a dash, or when it is
+// all expansion, like $FLAGS or "$(cmd)". A word with literal text after
+// its expansions, like "$(cmd)p" or $(npm root -g)/x, is taken as an
+// operand: options are spelled out or passed whole, not built that way.
+func (s *state) unresolvedKind(words []*syntax.Word) unresolved {
+	for _, w := range words {
+		if f, err := expand.Fields(s.config(), w); err == nil && !containsUnknown(f) {
+			continue
+		}
+		t, ok := firstText(w.Parts)
+		if !ok || strings.HasPrefix(strings.TrimLeft(t, `\`), "-") {
+			return someWords
+		}
+	}
+	return someOperands
+}
+
+// firstText returns the first literal text in parts, looking inside double
+// quotes, and whether there is any.
+func firstText(parts []syntax.WordPart) (string, bool) {
+	for _, p := range parts {
+		switch x := p.(type) {
+		case *syntax.Lit:
+			if x.Value != "" {
+				return x.Value, true
+			}
+		case *syntax.SglQuoted:
+			if x.Value != "" {
+				return x.Value, true
+			}
+		case *syntax.DblQuoted:
+			if t, ok := firstText(x.Parts); ok {
+				return t, true
+			}
+		}
+	}
+	return "", false
+}
+
+// optionGated reports a program that writes files only when an option
+// says so: sed and perl with -i, find with -delete. Operands that could not
+// be expanded cannot make it destructive. find with -exec runs a program
+// that could be one of those operands, so it is not gated.
+func optionGated(name string, args []string) bool {
+	switch name {
+	case "sed", "perl":
+		return true
+	case "find":
+		for _, a := range args {
+			switch a {
+			case "-exec", "-execdir", "-ok", "-okdir":
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// dispatch looks at one simple command. When some operands could not be
+// expanded, a broader snapshot is taken, unless they cannot matter.
+func (s *state) dispatch(argv []string, unres unresolved) {
 	for len(argv) > 0 {
 		name := progName(argv[0])
 		rest := argv[1:]
@@ -510,7 +586,12 @@ func (s *state) dispatch(argv []string, unresolved bool) {
 	}
 	before := len(s.actions)
 	h(s, name, args)
-	if unresolved && len(s.actions) == before && pathCommands[name] {
+	if unres != allResolved && len(s.actions) == before && pathCommands[name] {
+		if unres == someOperands && optionGated(name, args) {
+			// A read only sed -n "$(grep -n x f)p" f would otherwise save
+			// the whole folder, which can be hundreds of thousands of files.
+			return
+		}
 		s.broad(name, "some arguments could not be resolved before running")
 	}
 }
@@ -527,7 +608,7 @@ func (s *state) dispatchExtra(argv []string) {
 		s.broad(name, "targets arrive through xargs")
 		return
 	}
-	s.dispatch(argv, true)
+	s.dispatch(argv, someWords)
 }
 
 func (s *state) broad(name, note string) {

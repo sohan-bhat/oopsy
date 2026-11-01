@@ -39,7 +39,7 @@ func (ps *psState) native(name string, rest []psTok) {
 	case "bash", "sh", "wsl":
 		bs := newState(ps.cwd, ps.rawEnv)
 		if name == "wsl" {
-			bs.dispatch(argv, false)
+			bs.dispatch(argv, allResolved)
 		} else {
 			bs.shellC(argv)
 		}
