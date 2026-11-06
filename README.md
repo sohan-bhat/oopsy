@@ -2,11 +2,11 @@
 
 **Undo for `rm -rf`, and everything else you wish you hadn't run.** Files (deletes and overwrites, by any command, including `make clean`, npm scripts and scripts Oopsy has never seen), git (resets, branches, stashes, force pushes) and Postgres (drops, deletes, bad updates). Oopsy snapshots it right before it is destroyed, whether you typed the command or your AI agent did. Type `oops` and it is back.
 
-[![Watch the Oopsy demo](docs/oopsy-demo-poster.jpg)](https://sohan-bhat.github.io/oopsy/oopsy-demo.mp4)
+[![Watch the Oopsy demo](docs/oopsy-demo-poster.jpg)](https://sohanbhat.me/oopsy/oopsy-demo.mp4)
 
-[Watch the 36 second demo](https://sohan-bhat.github.io/oopsy/oopsy-demo.mp4)
+[Watch the 36 second demo](https://sohanbhat.me/oopsy/oopsy-demo.mp4)
 
-Website: https://sohan-bhat.github.io/oopsy/
+Website: https://sohanbhat.me/oopsy/
 
 Runs on macOS, Linux and Windows.
 
@@ -40,7 +40,7 @@ brew install sohan-bhat/tap/oopsy
 or
 
 ```sh
-curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | sh
+curl -fsSL https://sohanbhat.me/oopsy/install.sh | sh
 ```
 
 Windows:
@@ -53,17 +53,17 @@ scoop install oopsy/oopsy
 or
 
 ```powershell
-irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+irm https://sohanbhat.me/oopsy/install.ps1 | iex
 ```
 
 To pin a version, set `OOPS_VERSION` (without the `v`):
 
 ```sh
-curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPS_VERSION=0.2.0 sh
+curl -fsSL https://sohanbhat.me/oopsy/install.sh | OOPS_VERSION=0.2.0 sh
 ```
 
 ```powershell
-$env:OOPS_VERSION = '0.2.0'; irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+$env:OOPS_VERSION = '0.2.0'; irm https://sohanbhat.me/oopsy/install.ps1 | iex
 scoop install oopsy/oopsy@0.2.0
 ```
 

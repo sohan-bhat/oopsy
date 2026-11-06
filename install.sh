@@ -1,8 +1,8 @@
 #!/bin/sh
-# Oopsy installer: curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | sh
+# Oopsy installer: curl -fsSL https://sohanbhat.me/oopsy/install.sh | sh
 # Installs oops and oops-db into /usr/local/bin when writable, else ~/.local/bin.
 # Pin a version with OOPS_VERSION, for example:
-#   curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPS_VERSION=0.2.0 sh
+#   curl -fsSL https://sohanbhat.me/oopsy/install.sh | OOPS_VERSION=0.2.0 sh
 # Set OOPSY_BIN_DIR to pick a directory.
 set -eu
 
@@ -27,7 +27,7 @@ fi
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$os" in
   darwin|linux) ;;
-  mingw*|msys*|cygwin*) fail "on Windows, install with PowerShell: irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex" ;;
+  mingw*|msys*|cygwin*) fail "on Windows, install with PowerShell: irm https://sohanbhat.me/oopsy/install.ps1 | iex" ;;
   *) fail "unsupported OS: $os (Oopsy supports macOS, Linux and Windows)" ;;
 esac
 arch="$(uname -m)"

@@ -1,5 +1,5 @@
 # Oopsy installer for Windows:
-#   irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+#   irm https://sohanbhat.me/oopsy/install.ps1 | iex
 # Installs oops.exe and oops-db.exe into %LOCALAPPDATA%\Programs\oopsy and
 # adds that folder to your user PATH. Works in Windows PowerShell 5.1 and
 # PowerShell 7. Pin a version first with $env:OOPS_VERSION = '0.2.0', and

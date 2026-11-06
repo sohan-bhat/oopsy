@@ -77,7 +77,7 @@ jobs:
         shell: ${{ matrix.shell }}
     steps:
       - name: irm install.ps1 | iex
-        run: irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+        run: irm https://sohanbhat.me/oopsy/install.ps1 | iex
       - name: Run it from a new shell with the user PATH
         run: |
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
@@ -89,7 +89,7 @@ jobs:
       - name: Pin an older version
         run: |
           $env:OOPS_VERSION = $env:PINNED
-          irm https://sohan-bhat.github.io/oopsy/install.ps1 | iex
+          irm https://sohanbhat.me/oopsy/install.ps1 | iex
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
           $v = oops --version
           $v
@@ -104,14 +104,14 @@ jobs:
     steps:
       - name: curl install.sh | sh
         run: |
-          curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPSY_BIN_DIR="$HOME/bin" sh
+          curl -fsSL https://sohanbhat.me/oopsy/install.sh | OOPSY_BIN_DIR="$HOME/bin" sh
           v="$("$HOME/bin/oops" --version)"
           echo "$v"
           if [ -n "$WANT" ]; then case "$v" in *"${WANT#v}"*) ;; *) echo "expected $WANT"; exit 1 ;; esac; fi
           "$HOME/bin/oops" explain rm -rf build
       - name: Pin an older version
         run: |
-          curl -fsSL https://sohan-bhat.github.io/oopsy/install.sh | OOPS_VERSION="$PINNED" OOPSY_BIN_DIR="$HOME/pinned" sh
+          curl -fsSL https://sohanbhat.me/oopsy/install.sh | OOPS_VERSION="$PINNED" OOPSY_BIN_DIR="$HOME/pinned" sh
           v="$("$HOME/pinned/oops" --version)"
           echo "$v"
           case "$v" in *"$PINNED"*) ;; *) echo "expected $PINNED"; exit 1 ;; esac
