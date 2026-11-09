@@ -15,30 +15,48 @@
   const copyBtn = $("#install-copy");
   const copyLabel = copyBtn.querySelector(".install__copy-label");
   const copyStatus = $("#copy-status");
-  const prompt = document.querySelector(".install__dollar");
+  const prompts = Array.from(document.querySelectorAll(".install__dollar"));
 
-  function selectTab(tab, focus) {
-    tabs.forEach((t) => {
+  function tablist(list, select) {
+    list.forEach((tab, i) => {
+      tab.addEventListener("click", () => select(tab));
+      tab.addEventListener("keydown", (e) => {
+        const to = { ArrowRight: i + 1, ArrowLeft: i + list.length - 1, Home: 0, End: list.length - 1 }[e.key];
+        if (to === undefined) return;
+        e.preventDefault();
+        select(list[to % list.length], true);
+      });
+    });
+  }
+  function markSelected(list, tab) {
+    list.forEach((t) => {
       const on = t === tab;
       t.setAttribute("aria-selected", String(on));
       t.tabIndex = on ? 0 : -1;
     });
+  }
+
+  function selectTab(tab, focus) {
+    markSelected(tabs, tab);
     renderCmd(tab.dataset.cmd);
-    prompt.textContent = tab.dataset.prompt || "$";
+    prompts.forEach((p) => { p.textContent = tab.dataset.prompt || "$"; });
     panel.setAttribute("aria-labelledby", tab.id);
     resetCopy();
     if (focus) tab.focus();
   }
-  tabs.forEach((tab, i) => {
-    tab.addEventListener("click", () => selectTab(tab));
-    tab.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-        e.preventDefault();
-        const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
-        selectTab(next, true);
-      }
+  tablist(tabs, selectTab);
+
+  const demoTabs = Array.from(document.querySelectorAll(".seg__tab"));
+  function selectDemo(tab, focus) {
+    markSelected(demoTabs, tab);
+    demoTabs.forEach((t) => {
+      const on = t === tab;
+      $("#" + t.getAttribute("aria-controls")).hidden = !on;
+      $("#" + t.dataset.ctl).hidden = !on;
     });
-  });
+    if (focus) tab.focus();
+  }
+  tablist(demoTabs, selectDemo);
 
   // Wrap only between words, so a narrow screen never splits sohan-bhat at its hyphen.
   function renderCmd(cmd) {
@@ -452,7 +470,7 @@ export async function createInvoice(user, items) {
         line(`Try it: <b>oops explain rm -rf build</b> then <b>oops doctor</b>`);
         return;
       }
-      if (sub === "db") return text("Try the Postgres demo further down the page.", "ln--dim");
+      if (sub === "db") return text("Open the Postgres tab to try oops db.", "ln--dim");
       if (sub === "help" || sub === "--help" || sub === "-h") {
         text("Undo destructive commands, for people and AI coding agents");
         gap();
@@ -901,7 +919,6 @@ export async function createInvoice(user, items) {
     dbBusy = false;
     dbSeq = 0;
     dbOut.textContent = "";
-    dbLine(`<span class="d"># psql talks to Postgres through oops db proxy.</span>`);
     dbLine(`<span class="d"># Run something you will regret.</span>`);
     dbRender();
     dbUpdateChips();
