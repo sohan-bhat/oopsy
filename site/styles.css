@@ -430,11 +430,11 @@ button { font: inherit; color: inherit; }
 .foot__inner { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px; }
 .foot__license { color: #b9b7c2; font-size: 16px; }
 .foot__links { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px 24px; }
-.foot__links a {
+.foot__links a, .foot__license a {
   color: var(--paper); font-size: 16px; font-weight: 600;
   text-decoration-thickness: 1.5px; text-underline-offset: 4px;
 }
-.foot__links a:hover { color: var(--eraser); }
+.foot__links a:hover, .foot__license a:hover { color: var(--eraser); }
 .foot :focus-visible { outline-color: var(--eraser); }
 .brand--foot .brand__word { color: var(--paper); }
 
