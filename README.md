@@ -191,3 +191,5 @@ On Windows also:
 ## License
 
 MIT
+
+Built by [Sohan Bhat](https://sohanbhat.me/).
